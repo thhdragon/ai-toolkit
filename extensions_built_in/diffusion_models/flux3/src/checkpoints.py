@@ -14,6 +14,10 @@ candidates, and a loaded one is rejected by its ``ref_time_in`` keys.
 BASE_REPO = "black-forest-labs/flux-3-image-klein-base"
 COMFY_REPO = "black-forest-labs/flux-3-image-klein-comfy"
 
+TURBO_REPO = "NoiseToNova/Flux-3-Klein-turbo-pdd-4_8-steps"
+TURBO_COMFY_FILE = "loras/Flux-3-Klein-turbo-pdd-4_8-steps-comfy.safetensors"
+TURBO_FILENAME = "Flux-3-Klein-turbo-pdd-4_8-steps-comfy.safetensors"
+
 # repo-relative comfy DiT files; the resolver orders them by the requested
 # qtype (convrot8 -> int8, nvfp4 -> nvfp4, anything else -> bf16). The text
 # encoder stays on the Comfy-Org Qwen3-VL repack (src/text_encoder.py).

@@ -159,7 +159,10 @@ class Flux3Pipeline:
         if alpha is None:
             alpha = DEFAULT_ALPHA
         if sigmas is not None:
-            timesteps = torch.tensor(sigmas_with_terminal(sigmas), dtype=torch.float32).to(device)
+            if len(sigmas) > 0 and sigmas[-1] == 0.0:
+                timesteps = torch.tensor(sigmas, dtype=torch.float32).to(device)
+            else:
+                timesteps = torch.tensor(sigmas_with_terminal(sigmas), dtype=torch.float32).to(device)
         else:
             timesteps = build_timesteps(num_inference_steps, alpha=alpha).to(device)
 
@@ -201,6 +204,8 @@ class Flux3Pipeline:
 
         # Euler integration of the flow ODE with CFG
         for step_index, (t_curr, t_prev) in enumerate(zip(timesteps[:-1], timesteps[1:])):
+            if hasattr(transformer, "set_pdd_step"):
+                transformer.set_pdd_step(step_index)
             x_in = x.to(dtype).repeat(cfg_batch, 1, 1)
             pred = transformer(
                 ctx=ctx,

@@ -50,7 +50,7 @@ from toolkit.basic import flush
 from toolkit.config_modules import GenerateImageConfig, ModelConfig
 from toolkit.metadata import get_meta_for_safetensors
 from toolkit.models.base_model import BaseModel
-from toolkit.models.v2.resolver import resolve_comfy_file
+from toolkit.models.v2.resolver import resolve_comfy_file, resolve_component_file
 from toolkit.paths import MODELS_PATH
 from toolkit.unloader import FakeTextEncoder
 from toolkit.samplers.custom_flowmatch_sampler import (
@@ -65,7 +65,14 @@ from .src.pipeline import (
     pack_i2i_image_condition,
     pack_image_latents,
 )
-from .src.checkpoints import BASE_REPO, COMFY_REPO, PACKAGE_TO_COMFY
+from .src.checkpoints import (
+    BASE_REPO,
+    COMFY_REPO,
+    PACKAGE_TO_COMFY,
+    TURBO_FILENAME,
+    TURBO_REPO,
+)
+from .src.turbo_pdd import Flux3TurboPDD
 from .src.text_encoder import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PAD_MULTIPLE,
@@ -129,6 +136,7 @@ class Flux3Model(BaseModel):
             self.model_config.model_kwargs.get("match_target_res", True)
         )
         self.latent_space_version = "flux3_v1"
+        self._turbo_pdd: Optional[Flux3TurboPDD] = None
 
     @staticmethod
     def get_train_scheduler():
@@ -362,6 +370,34 @@ class Flux3Model(BaseModel):
         self.print_and_status_update("Model Loaded")
 
     # ------------------------------------------------------------------
+    # Turbo LoRA (PDD student)
+    # ------------------------------------------------------------------
+    def _resolve_turbo_weight_path(self) -> str:
+        override = self.model_config.model_kwargs.get("turbo_lora_path", None)
+        if override is None:
+            override = self.model_config.model_kwargs.get("assistant_lora_path", None)
+        if override is not None:
+            if not os.path.exists(override):
+                raise FileNotFoundError(f"FLUX.3 turbo LoRA override not found: {override}")
+            return override
+
+        return resolve_component_file(
+            f"{TURBO_REPO}/{TURBO_FILENAME}",
+            folder="loras",
+            component="FLUX.3 turbo LoRA",
+            status_fn=self.print_and_status_update,
+        )
+
+    def _get_turbo_pdd(self, num_steps: int = 4) -> Flux3TurboPDD:
+        if self._turbo_pdd is None:
+            weight_path = self._resolve_turbo_weight_path()
+            self.print_and_status_update(
+                f"Loading FLUX.3 turbo LoRA (PDD student) from {weight_path}"
+            )
+            self._turbo_pdd = Flux3TurboPDD(weight_path, default_steps=num_steps)
+        return self._turbo_pdd
+
+    # ------------------------------------------------------------------
     # Generation (training previews)
     # ------------------------------------------------------------------
     def get_generation_pipeline(self):
@@ -383,13 +419,41 @@ class Flux3Model(BaseModel):
         gen_config.width = int(gen_config.width // sc * sc)
         gen_config.height = int(gen_config.height // sc * sc)
 
+        use_turbo = self.model_config.model_kwargs.get("use_turbo", True)
+        use_turbo = self.model_config.model_kwargs.get("use_turbo_lora", use_turbo)
+        if extra and "use_turbo" in extra:
+            use_turbo = bool(extra["use_turbo"])
+
+        if use_turbo:
+            steps = 4
+            if gen_config.num_inference_steps == 8:
+                steps = 8
+
+            turbo = self._get_turbo_pdd(num_steps=steps)
+            transformer = unwrap_model(self.model)
+
+            # Turbo PDD student has teacher CFG (4.0) distilled in; default guidance_scale is 1.0
+            guidance_scale = gen_config.guidance_scale
+            if guidance_scale > 1.0 and (
+                gen_config.guidance_scale in (3.5, 4.0, 7.0, 7.5)
+                or not self.model_config.model_kwargs.get("keep_cfg_with_turbo", False)
+            ):
+                guidance_scale = 1.0
+
+            do_cfg = unconditional_embeds is not None and guidance_scale > 1.0
+        else:
+            steps = gen_config.num_inference_steps
+            guidance_scale = gen_config.guidance_scale
+            do_cfg = unconditional_embeds is not None and guidance_scale > 1.0
+
         # cond and uncond were encoded separately, so their pad-to-80 windows
         # can differ. The DiT attends to real pad-token states, not zeros, so
         # re-encode the shorter prompt at the longer window when the TE is up
         # (cached embeddings: the TE is an unloaded stub; the shorter side is
         # zero-padded in build_text_conditioning instead)
         if (
-            unconditional_embeds is not None
+            do_cfg
+            and unconditional_embeds is not None
             and self.text_encoder is not None
             and not isinstance(self.text_encoder, FakeTextEncoder)
         ):
@@ -425,19 +489,35 @@ class Flux3Model(BaseModel):
         alpha = self.model_config.model_kwargs.get("sample_alpha", None)
         alpha = float(alpha) if alpha is not None else None
 
-        result = pipeline(
-            conditional_embeds=conditional_embeds,
-            unconditional_embeds=unconditional_embeds,
-            height=gen_config.height,
-            width=gen_config.width,
-            num_inference_steps=gen_config.num_inference_steps,
-            sigmas=gen_config.sigmas,
-            guidance_scale=gen_config.guidance_scale,
-            latents=gen_config.latents,
-            generator=generator,
-            ctrl_imgs=ctrl_imgs,
-            alpha=alpha,
-        )
+        if use_turbo:
+            with turbo.activate(transformer, steps=steps):
+                result = pipeline(
+                    conditional_embeds=conditional_embeds,
+                    unconditional_embeds=unconditional_embeds,
+                    height=gen_config.height,
+                    width=gen_config.width,
+                    num_inference_steps=steps,
+                    sigmas=turbo.step_sigmas,
+                    guidance_scale=guidance_scale,
+                    latents=gen_config.latents,
+                    generator=generator,
+                    ctrl_imgs=ctrl_imgs,
+                    alpha=None,
+                )
+        else:
+            result = pipeline(
+                conditional_embeds=conditional_embeds,
+                unconditional_embeds=unconditional_embeds,
+                height=gen_config.height,
+                width=gen_config.width,
+                num_inference_steps=steps,
+                sigmas=gen_config.sigmas,
+                guidance_scale=guidance_scale,
+                latents=gen_config.latents,
+                generator=generator,
+                ctrl_imgs=ctrl_imgs,
+                alpha=alpha,
+            )
         return result[0]
 
     def _fit_reference(self, img: torch.Tensor, target_pixels: int) -> torch.Tensor:
