@@ -147,8 +147,9 @@ class EnvSpec(object):
         torch_links=None,
         no_deps_packages=None,
         runtime_dll_dirs=None,
+        torch_install_packages=None,
     ):
-        self.backend = backend  # cu134 / cu130 / cu126 / rocm7.1 / mps / cpu
+        self.backend = backend  # cu134 / cu130 / cu126 / rocm7.1 / rocm10.2.0 / mps / cpu
         self.torch_packages = torch_packages  # {name: version}
         self.torch_index = torch_index  # None = PyPI
         self.python_version = python_version
@@ -173,9 +174,11 @@ class EnvSpec(object):
         self.runtime_dll_dirs = runtime_dll_dirs or []
         # env vars every venv python needs (sitecustomize setdefault)
         self.runtime_env = {}
+        self.torch_install_packages = torch_install_packages
 
     def torch_args(self):
-        args = ["%s==%s" % (k, v) for k, v in sorted(self.torch_packages.items())]
+        pkgs = self.torch_install_packages or self.torch_packages
+        args = ["%s==%s" % (k, v) for k, v in sorted(pkgs.items())]
         if self.torch_index:
             args += ["--index-url", self.torch_index]
         for links in self.torch_links:
@@ -443,10 +446,52 @@ def _build_spec(detection, allow_cpu=False):
         return _cuda_spec(detection)
 
     if detection["backend"] == "rocm":
+        rocm_info = detection.get("rocm", {})
+        gpus = rocm_info.get("gpus", [])
+        gfx = None
+        for g in gpus:
+            if g.get("gfx"):
+                gfx = g["gfx"]
+                break
+
+        has_rocm_reqs = os.path.isfile(os.path.join(REPO_ROOT, "requirements_rocm.txt"))
+        req_file = "requirements_rocm.txt" if has_rocm_reqs else "requirements.txt"
+
+        if gfx:
+            backend_name = "rocm10.2.0"
+            torch_pkgs = {
+                "torch": "2.15.0",
+                "torchvision": "0.29.2",
+                "torchaudio": "2.11.1",
+            }
+            torch_install_pkgs = {
+                "torch[device-%s]" % gfx: "2.15.0+rocm10.2.0",
+                "torchvision[device-%s]" % gfx: "0.29.2+rocm10.2.0",
+                "torchaudio": "2.11.1+rocm10.2.0",
+            }
+            extra_pkgs = [
+                TORCHCODEC,
+            ]
+            notes = [
+                "AMD ROCm %s detected targeting %s." % (backend_name, gfx),
+                "Using wheels from https://stable.repo.amd.com/rocm/whl-next/.",
+            ]
+            return EnvSpec(
+                backend_name,
+                torch_pkgs,
+                torch_index="https://stable.repo.amd.com/rocm/whl-next/",
+                requirements_file=req_file,
+                extra_packages=extra_pkgs,
+                torch_install_packages=torch_install_pkgs,
+                find_links=["https://stable.repo.amd.com/rocm/whl-next/"],
+                notes=notes,
+            )
+
         return EnvSpec(
             "rocm7.1",
             TORCH,
             torch_index=PYTORCH_INDEX + "rocm7.1",
+            requirements_file=req_file,
             extra_packages=[TORCHCODEC],
             # runs on ROCm via the triton bundled with rocm torch
             optional_packages=[FLA],

@@ -56,7 +56,19 @@ def run_doctor():
             % (names, d["nvidia"]["driver"], d["nvidia"]["cuda_version"]),
         )
     elif d["rocm"]:
-        _check("gpu", True, "AMD ROCm (experimental)")
+        rocm_info = d["rocm"]
+        gpus = rocm_info.get("gpus", [])
+        names = ", ".join(g["name"] for g in gpus) if gpus else "AMD ROCm"
+        gfxs = ", ".join(sorted(set(g["gfx"] for g in gpus if g.get("gfx"))))
+        detail = names
+        extra = []
+        if gfxs:
+            extra.append(gfxs)
+        if rocm_info.get("driver"):
+            extra.append("driver %s" % rocm_info["driver"])
+        if extra:
+            detail += " (%s)" % ", ".join(extra)
+        _check("gpu", True, detail)
     elif d["backend"] == "mps":
         _check("gpu", True, "Apple Silicon (MPS)")
     else:

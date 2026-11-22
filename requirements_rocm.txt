@@ -1,0 +1,12 @@
+-r requirements_base.txt
+scipy>=1.14
+
+# ROCm torch and runtime deps for gfx1150 (managed by AI Toolkit manager):
+# https://stable.repo.amd.com/rocm/whl-next/
+# torch[device-gfx1150]==2.15.0+rocm10.2.0
+# torchvision[device-gfx1150]==0.29.2+rocm10.2.0
+# torchaudio==2.11.1+rocm10.2.0
+# rocm[devel,libraries,device-gfx1150]==10.2.0
+
+# Optional flash-attention build with AMD Triton autotune:
+# AITER_USE_SYSTEM_TRITON=1 FLASH_ATTENTION_TRITON_AMD_AUTOTUNE="TRUE" GPU_ARCHS="gfx1150" PYTORCH_ROCM_ARCH="gfx1150" MAX_JOBS=4 uv pip install --no-build-isolation https://github.com/Dao-AILab/flash-attention.git

@@ -26,6 +26,116 @@ const NV_QUERY_ARGS = [
   '--format=csv,noheader,nounits',
 ];
 const NV_ENV = { ...process.env, CUDA_DEVICE_ORDER: 'PCI_BUS_ID' };
+
+export const ROCM_QUERY_ARGS = [
+  '--showproductname',
+  '--showtemp',
+  '--showuse',
+  '--showmemuse',
+  '--showpower',
+  '--showmeminfo',
+  'vram',
+  '--showdriverversion',
+  '--showclocks',
+  '--showfan',
+  '--showid',
+  '--json',
+];
+
+export function parseRocmOutput(stdout: string): GpuInfo[] {
+  let data: Record<string, any>;
+  try {
+    data = JSON.parse(stdout.trim());
+  } catch {
+    return [];
+  }
+
+  const driverVersion = data.system?.['Driver version'] || 'ROCm';
+  const gpus: GpuInfo[] = [];
+
+  for (const [key, cardVal] of Object.entries(data)) {
+    if (!key.startsWith('card') || typeof cardVal !== 'object' || !cardVal) continue;
+    const card = cardVal as Record<string, any>;
+    const indexMatch = key.match(/^card(\d+)$/);
+    const index = indexMatch ? parseInt(indexMatch[1], 10) : 0;
+
+    const name = card['Card Series'] || card['Device Name'] || `AMD Radeon (Card ${index})`;
+
+    let temp = 0;
+    const tempKey = Object.keys(card).find(k => k.toLowerCase().includes('temperature'));
+    if (tempKey && card[tempKey]) {
+      temp = Math.round(parseFloat(card[tempKey])) || 0;
+    }
+
+    const gpuUtil = parseInt(card['GPU use (%)'] ?? card['GPU use'], 10) || 0;
+    let memUtil = parseInt(card['GPU Memory Allocated (VRAM%)'], 10);
+
+    const totalBytes = parseFloat(card['VRAM Total Memory (B)']) || 0;
+    const usedBytes = parseFloat(card['VRAM Total Used Memory (B)']) || 0;
+    const totalMb = Math.round(totalBytes / (1024 * 1024));
+    const usedMb = Math.round(usedBytes / (1024 * 1024));
+    const freeMb = Math.max(0, totalMb - usedMb);
+
+    if (isNaN(memUtil) || memUtil < 0) {
+      memUtil = totalMb > 0 ? Math.round((usedMb / totalMb) * 100) : 0;
+    }
+
+    let powerDraw = 0;
+    const powerKey = Object.keys(card).find(
+      k => k.includes('Current Socket Graphics Package Power') || k.includes('Power'),
+    );
+    if (powerKey && card[powerKey]) {
+      powerDraw = parseFloat(card[powerKey]) || 0;
+    }
+    const powerLimit = parseFloat(card['Max Graphics Package Power (W)'] || card['Power Cap (W)']) || 0;
+
+    let clockGraphics = 0;
+    if (card['sclk clock speed:']) {
+      const match = String(card['sclk clock speed:']).match(/(\d+)/);
+      if (match) clockGraphics = parseInt(match[1], 10);
+    }
+    let clockMemory = 0;
+    if (card['mclk clock speed:']) {
+      const match = String(card['mclk clock speed:']).match(/(\d+)/);
+      if (match) clockMemory = parseInt(match[1], 10);
+    }
+
+    let fanSpeed = 0;
+    const fanKey = Object.keys(card).find(k => k.toLowerCase().includes('fan speed'));
+    if (fanKey && card[fanKey]) {
+      fanSpeed = parseInt(card[fanKey], 10) || 0;
+    }
+
+    gpus.push({
+      index,
+      name,
+      driverVersion,
+      temperature: temp,
+      utilization: {
+        gpu: gpuUtil,
+        memory: memUtil,
+      },
+      memory: {
+        total: totalMb,
+        free: freeMb,
+        used: usedMb,
+      },
+      power: {
+        draw: powerDraw,
+        limit: powerLimit,
+      },
+      clocks: {
+        graphics: clockGraphics,
+        memory: clockMemory,
+      },
+      fan: {
+        speed: fanSpeed,
+      },
+    });
+  }
+
+  return gpus.sort((a, b) => a.index - b.index);
+}
 // No stdout line for this long means the loop child is buffering or hung.
 const NV_WATCHDOG_MS = 15_000;
 // A line-less gap this long after the last line closes out a batch (all
@@ -97,18 +207,15 @@ function parseGpuLine(line: string): GpuInfo | null {
   };
 }
 
-// Integrated NVIDIA GPUs that share system RAM with the CPU.
-const UNIFIED_MEMORY_GPU = /\b(GB10|RTX Spark)\b/i;
+// Integrated GPUs that share system RAM with the CPU.
+const UNIFIED_MEMORY_GPU = /\b(GB10|RTX Spark|Radeon\s+[0-9]+[A-Z]?\s+Graphics|Radeon\s+Graphics)\b/i;
 
 /**
- * Unified-memory GPUs (GB10 / DGX Spark, RTX Spark) have no dedicated VRAM.
- * On Linux nvidia-smi reports their memory as [N/A]; on Windows (WDDM) it
- * reports only the small dedicated segment (8 GB) even though CUDA can use
- * most of system RAM. Report the system RAM pool they share instead, like
- * the Mac path does for Apple silicon.
+ * Unified-memory GPUs (GB10 / DGX Spark, RTX Spark, AMD APUs) have no dedicated VRAM
+ * or only a small carveout (512MB-1GB). Report the system RAM pool they share instead.
  */
 function isSharedMemoryGpu(g: GpuInfo): boolean {
-  return isNaN(g.memory.total) || UNIFIED_MEMORY_GPU.test(g.name);
+  return isNaN(g.memory.total) || g.memory.total <= 1024 || UNIFIED_MEMORY_GPU.test(g.name);
 }
 
 function withSharedMemory(gpu: GPUApiResponse, cpu: CpuInfo | null): GPUApiResponse {
@@ -131,8 +238,11 @@ class SystemMonitor {
   private history: MonitorHistoryPoint[] = [];
   private subscribers = new Set<Subscriber>();
   private latestCpu: CpuInfo | null = null;
-  private latestGpu: GPUApiResponse = { hasNvidiaSmi: false, isMac: this.isMac, gpus: [] };
+  private latestGpu: GPUApiResponse = { hasNvidiaSmi: false, hasRocmSmi: false, isMac: this.isMac, gpus: [] };
   private macGpuName = 'Apple GPU';
+  private gpuBackend: 'detecting' | 'nvidia' | 'rocm' | 'none' = 'detecting';
+  private rocmUnavailable = false;
+  private rocmInFlight = false;
   private nvChild: ChildProcess | null = null;
   private nvBatch: GpuInfo[] = [];
   private nvStdoutBuffer = '';
@@ -155,7 +265,7 @@ class SystemMonitor {
     if (this.isMac) {
       this.initMacGpuName();
     } else {
-      this.startNvLoop();
+      this.detectAndStartGpu();
     }
     // Never leave a resident nvidia-smi behind.
     process.once('exit', () => {
@@ -208,10 +318,14 @@ class SystemMonitor {
     try {
       if (this.isMac) {
         this.latestGpu = this.sampleMacGpu();
-      } else if (this.nvOneShotMode) {
-        await this.sampleNvOneShot();
-      } else {
-        this.nvWatchdog();
+      } else if (this.gpuBackend === 'rocm') {
+        await this.sampleRocmOneShot();
+      } else if (this.gpuBackend === 'nvidia') {
+        if (this.nvOneShotMode) {
+          await this.sampleNvOneShot();
+        } else {
+          this.nvWatchdog();
+        }
       }
     } catch (error) {
       console.error('Monitor: GPU sample failed:', error);
@@ -398,6 +512,77 @@ class SystemMonitor {
   }
 
   // -------------------------------------------------------------------------
+  // GPU backend detection & ROCm sampling
+  // -------------------------------------------------------------------------
+  private async detectAndStartGpu(): Promise<void> {
+    const isWindows = process.platform === 'win32';
+    let hasNv = false;
+    try {
+      const checkCmd = isWindows ? 'where nvidia-smi' : 'which nvidia-smi';
+      await execFileAsync(isWindows ? 'cmd' : 'sh', ['-c', checkCmd]);
+      hasNv = true;
+    } catch {
+      hasNv = false;
+    }
+
+    if (hasNv) {
+      this.gpuBackend = 'nvidia';
+      this.startNvLoop();
+      return;
+    }
+
+    let hasRocm = false;
+    try {
+      const checkCmd = isWindows ? 'where rocm-smi' : 'which rocm-smi';
+      await execFileAsync(isWindows ? 'cmd' : 'sh', ['-c', checkCmd]);
+      hasRocm = true;
+    } catch {
+      hasRocm = false;
+    }
+
+    if (hasRocm) {
+      this.gpuBackend = 'rocm';
+      await this.sampleRocmOneShot();
+      return;
+    }
+
+    this.gpuBackend = 'none';
+    this.latestGpu = {
+      hasNvidiaSmi: false,
+      hasRocmSmi: false,
+      isMac: false,
+      gpus: [],
+      error: 'Neither nvidia-smi nor rocm-smi found or accessible',
+    };
+  }
+
+  private async sampleRocmOneShot(): Promise<void> {
+    if (this.rocmUnavailable || this.rocmInFlight) return;
+    this.rocmInFlight = true;
+    try {
+      const { stdout } = await execFileAsync('rocm-smi', ROCM_QUERY_ARGS, { env: process.env });
+      const gpus = parseRocmOutput(stdout);
+      this.latestGpu = { hasNvidiaSmi: false, hasRocmSmi: true, isMac: false, gpus };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.rocmUnavailable = true;
+        this.gpuBackend = 'none';
+        this.latestGpu = {
+          hasNvidiaSmi: false,
+          hasRocmSmi: false,
+          isMac: false,
+          gpus: [],
+          error: 'rocm-smi not found or not accessible',
+        };
+      } else {
+        console.error('Monitor: one-shot rocm-smi failed:', err);
+      }
+    } finally {
+      this.rocmInFlight = false;
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // NVIDIA loop-mode child
   // -------------------------------------------------------------------------
   private startNvLoop(): void {
@@ -473,6 +658,7 @@ class SystemMonitor {
     if (this.nvBatch.length === 0) return;
     this.latestGpu = {
       hasNvidiaSmi: true,
+      hasRocmSmi: false,
       isMac: false,
       gpus: this.nvBatch.sort((a, b) => a.index - b.index),
     };
@@ -502,7 +688,7 @@ class SystemMonitor {
         .map(parseGpuLine)
         .filter((gpu): gpu is GpuInfo => gpu !== null)
         .sort((a, b) => a.index - b.index);
-      this.latestGpu = { hasNvidiaSmi: true, isMac: false, gpus };
+      this.latestGpu = { hasNvidiaSmi: true, hasRocmSmi: false, isMac: false, gpus };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         this.markNvUnavailable();
@@ -514,13 +700,26 @@ class SystemMonitor {
     }
   }
 
-  private markNvUnavailable(): void {
+  private async markNvUnavailable(): Promise<void> {
     this.nvUnavailable = true;
+    if (this.gpuBackend === 'rocm') return;
+    try {
+      const isWindows = process.platform === 'win32';
+      const checkCmd = isWindows ? 'where rocm-smi' : 'which rocm-smi';
+      await execFileAsync(isWindows ? 'cmd' : 'sh', ['-c', checkCmd]);
+      this.gpuBackend = 'rocm';
+      await this.sampleRocmOneShot();
+      return;
+    } catch {
+      // rocm not available
+    }
+    this.gpuBackend = 'none';
     this.latestGpu = {
       hasNvidiaSmi: false,
+      hasRocmSmi: false,
       isMac: false,
       gpus: [],
-      error: 'nvidia-smi not found or not accessible',
+      error: 'Neither nvidia-smi nor rocm-smi found or accessible',
     };
   }
 }

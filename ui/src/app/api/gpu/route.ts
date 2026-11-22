@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import os from 'os';
 import { cached } from '@/server/apiCache';
 import { loadMacstats } from '@/server/macstats';
+import { parseRocmOutput, ROCM_QUERY_ARGS } from '@/server/monitor';
 
 const execAsync = promisify(exec);
 
@@ -134,21 +135,34 @@ async function getGpuInfo() {
   // Check if nvidia-smi is available
   const hasNvidiaSmi = await checkNvidiaSmi(isWindows);
 
-  if (!hasNvidiaSmi) {
+  if (hasNvidiaSmi) {
+    const gpuStats = await getGpuStats(isWindows);
     return {
-      hasNvidiaSmi: false,
+      hasNvidiaSmi: true,
+      hasRocmSmi: false,
       isMac: false,
-      gpus: [],
-      error: 'nvidia-smi not found or not accessible',
+      gpus: gpuStats,
     };
   }
 
-  // Get GPU stats
-  const gpuStats = await getGpuStats(isWindows);
+  // Check if rocm-smi is available
+  const hasRocmSmi = await checkRocmSmi(isWindows);
+  if (hasRocmSmi) {
+    const gpuStats = await getRocmGpuStats();
+    return {
+      hasNvidiaSmi: false,
+      hasRocmSmi: true,
+      isMac: false,
+      gpus: gpuStats,
+    };
+  }
 
   return {
-    hasNvidiaSmi: true,
-    gpus: gpuStats,
+    hasNvidiaSmi: false,
+    hasRocmSmi: false,
+    isMac: false,
+    gpus: [],
+    error: 'Neither nvidia-smi nor rocm-smi found or accessible',
   };
 }
 
@@ -248,4 +262,23 @@ async function getGpuStats(isWindows: boolean) {
     });
 
   return gpus;
+}
+
+async function checkRocmSmi(isWindows: boolean): Promise<boolean> {
+  try {
+    if (isWindows) {
+      await execAsync('where rocm-smi');
+    } else {
+      await execAsync('which rocm-smi');
+    }
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+async function getRocmGpuStats() {
+  const command = `rocm-smi ${ROCM_QUERY_ARGS.join(' ')}`;
+  const { stdout } = await execAsync(command);
+  return parseRocmOutput(stdout);
 }

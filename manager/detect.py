@@ -69,11 +69,49 @@ def detect_rocm():
     if not smi and not os.path.isdir("/opt/rocm"):
         return None
     gpus = []
-    out = _run_quiet([smi, "--showproductname"]) if smi else None
+    driver = None
+    out = (
+        _run_quiet([smi, "--showproductname", "--showdriverversion", "--json"])
+        if smi
+        else None
+    )
     if out:
-        for m in re.finditer(r"Card [Ss]eries:\s*(.+)", out):
-            gpus.append({"name": m.group(1).strip()})
-    return {"gpus": gpus}
+        try:
+            import json
+
+            data = json.loads(out)
+            driver = data.get("system", {}).get("Driver version")
+            for k in sorted(data.keys()):
+                if k.startswith("card") and isinstance(data[k], dict):
+                    card = data[k]
+                    gpu = {
+                        "name": card.get("Card Series")
+                        or card.get("Device Name")
+                        or "AMD Radeon GPU",
+                        "gfx": card.get("GFX Version"),
+                        "model": card.get("Card Model"),
+                    }
+                    gpus.append(gpu)
+        except Exception:
+            pass
+
+    if not gpus and smi:
+        out = _run_quiet([smi, "--showproductname"])
+        if out:
+            names = re.findall(r"Card [Ss]eries:\s*(.+)", out)
+            gfxs = re.findall(r"GFX Version:\s*(.+)", out)
+            for i, n in enumerate(names):
+                gpu = {"name": n.strip()}
+                if i < len(gfxs):
+                    gpu["gfx"] = gfxs[i].strip()
+                gpus.append(gpu)
+        drv_out = _run_quiet([smi, "--showdriverversion"])
+        if drv_out:
+            m = re.search(r"Driver version:\s*(.+)", drv_out)
+            if m:
+                driver = m.group(1).strip()
+
+    return {"gpus": gpus, "driver": driver}
 
 
 def detect():
