@@ -42,7 +42,6 @@ class Flux3TextEncoder(Qwen3VLTextEncoder):
     aitk_comfy_repo = "Comfy-Org/Qwen3-VL"
     _COMFY_FILES = [
         "text_encoders/qwen3vl_4b_bf16.safetensors",
-        "text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
     ]
     aitk_comfy_weight_names = {QWEN3_VL_4B_REPO: _COMFY_FILES}
 
