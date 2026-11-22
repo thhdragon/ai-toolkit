@@ -148,6 +148,7 @@ class EnvSpec(object):
         no_deps_packages=None,
         runtime_dll_dirs=None,
         torch_install_packages=None,
+        runtime_env=None,
     ):
         self.backend = backend  # cu134 / cu130 / cu126 / rocm7.1 / rocm10.2.0 / mps / cpu
         self.torch_packages = torch_packages  # {name: version}
@@ -173,7 +174,7 @@ class EnvSpec(object):
         # on Spark); baked into sitecustomize.py, missing dirs skipped
         self.runtime_dll_dirs = runtime_dll_dirs or []
         # env vars every venv python needs (sitecustomize setdefault)
-        self.runtime_env = {}
+        self.runtime_env = dict(runtime_env or {})
         self.torch_install_packages = torch_install_packages
 
     def torch_args(self):
@@ -457,6 +458,10 @@ def _build_spec(detection, allow_cpu=False):
         has_rocm_reqs = os.path.isfile(os.path.join(REPO_ROOT, "requirements_rocm.txt"))
         req_file = "requirements_rocm.txt" if has_rocm_reqs else "requirements.txt"
 
+        rocm_runtime_env = {
+            "MIOPEN_FIND_MODE": "2",
+            "HSA_ENABLE_SDMA": "0",
+        }
         if gfx:
             backend_name = "rocm10.2.0"
             torch_pkgs = {
@@ -485,6 +490,7 @@ def _build_spec(detection, allow_cpu=False):
                 torch_install_packages=torch_install_pkgs,
                 find_links=["https://stable.repo.amd.com/rocm/whl-next/"],
                 notes=notes,
+                runtime_env=rocm_runtime_env,
             )
 
         return EnvSpec(
@@ -499,6 +505,7 @@ def _build_spec(detection, allow_cpu=False):
                 "AMD ROCm support is experimental and largely untested.",
                 "flash-attn / NATTEN prebuilt wheels are unavailable for ROCm.",
             ],
+            runtime_env=rocm_runtime_env,
         )
 
     # CPU fallback

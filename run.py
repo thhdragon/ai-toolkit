@@ -7,6 +7,9 @@ os.environ["HF_XET_HIGH_PERFORMANCE"] = os.getenv("HF_XET_HIGH_PERFORMANCE", "1"
 os.environ["HF_HUB_DISABLE_XET"] = os.getenv("HF_HUB_DISABLE_XET", "0")
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"
+# AMD ROCm APU/RDNA defaults to prevent MIOpen solver profiling hangs and SDMA faults
+os.environ.setdefault("MIOPEN_FIND_MODE", "2")
+os.environ.setdefault("HSA_ENABLE_SDMA", "0")
 seed = None
 if "SEED" in os.environ:
     try:

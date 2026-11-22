@@ -24,6 +24,12 @@ printf '\033[90m  AI Toolkit Manager — Linux\033[0m\n'
 echo ""
 
 # ── 1. Ensure uv (prebuilt static binary, kept inside the repo) ─────
+# AMD ROCm APU/RDNA workarounds:
+# MIOPEN_FIND_MODE=2: Fast find mode prevents MIOpen solver profiling hangs
+# HSA_ENABLE_SDMA=0: Prevents SDMA queue GPU hangs on integrated APUs
+export MIOPEN_FIND_MODE="${MIOPEN_FIND_MODE:-2}"
+export HSA_ENABLE_SDMA="${HSA_ENABLE_SDMA:-0}"
+
 export PATH="$SCRIPT_DIR/.uv:$PATH"
 export UV_PYTHON_INSTALL_DIR="$SCRIPT_DIR/.uv/python"
 if ! command -v uv >/dev/null 2>&1; then
