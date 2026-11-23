@@ -25,36 +25,35 @@ target resolution).
 import json
 import math
 import os
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
+import huggingface_hub
 import torch
 import torch.nn.functional as F
 from PIL import Image
-from torchvision.transforms.functional import to_tensor
 from safetensors.torch import load_file, save_file
-
-import huggingface_hub
+from torchvision.transforms.functional import to_tensor
 from transformers import AutoProcessor, AutoTokenizer
-from toolkit.models.v2.text_encoders.qwen3_vl import Qwen3VLTextEncoder
 
-from toolkit.config_modules import GenerateImageConfig, ModelConfig
-from toolkit.models.base_model import BaseModel
-from toolkit.basic import flush
+from toolkit.accelerator import unwrap_model
 from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
+from toolkit.basic import flush
+from toolkit.config_modules import GenerateImageConfig, ModelConfig
+from toolkit.metadata import get_meta_for_safetensors
+from toolkit.models.base_model import BaseModel
+from toolkit.models.v2.text_encoders.qwen3_vl import Qwen3VLTextEncoder
 from toolkit.samplers.custom_flowmatch_sampler import (
     CustomFlowMatchEulerDiscreteScheduler,
 )
-from toolkit.accelerator import unwrap_model
-from toolkit.metadata import get_meta_for_safetensors
 
-from .src.transformer import MageFlow, MageFlowParams
-from .src.vae import MageVAE
+from .src.pipeline import MageFlowPipeline, predict_velocity
 from .src.text_encoder import (
     encode_mageflow_prompt,
     patch_qwen_vl_patch_embed,
     resize_vl_images,
 )
-from .src.pipeline import MageFlowPipeline, predict_velocity
+from .src.transformer import MageFlow, MageFlowParams
+from .src.vae import MageVAE
 
 if TYPE_CHECKING:
     from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
@@ -347,7 +346,7 @@ class MageFlowModel(BaseModel):
     # ------------------------------------------------------------------
     def _encode_ref_latents(
         self, control_tensors, target_height: int, target_width: int
-    ) -> List[torch.Tensor]:
+    ) -> list[torch.Tensor]:
         """Encode ``[0, 1]`` reference image tensors to clean VAE latents.
 
         Sizing (deliberate deviation from the reference ``generate_edits``,
@@ -373,8 +372,8 @@ class MageFlowModel(BaseModel):
             ratio = h / w
             new_h = math.sqrt(target_area * ratio)
             new_w = new_h / ratio
-            new_h = max(sc, int(round(new_h / sc)) * sc)
-            new_w = max(sc, int(round(new_w / sc)) * sc)
+            new_h = max(sc, round(new_h / sc) * sc)
+            new_w = max(sc, round(new_w / sc) * sc)
             if (new_h, new_w) != (h, w):
                 img = F.interpolate(
                     img,
@@ -395,7 +394,7 @@ class MageFlowModel(BaseModel):
         batch_size: int,
         target_height: int,
         target_width: int,
-    ) -> Optional[List[List[torch.Tensor]]]:
+    ) -> list[list[torch.Tensor]] | None:
         """Build predict_velocity's ``ref_latents`` from a train batch."""
         control_list = batch.control_tensor_list
         if control_list is None and batch.control_tensor is not None:
@@ -524,7 +523,7 @@ class MageFlowModel(BaseModel):
     # ------------------------------------------------------------------
     # VAE (MageVAE -- raw latents, no normalization)
     # ------------------------------------------------------------------
-    def encode_images(self, image_list: List[torch.Tensor], device=None, dtype=None):
+    def encode_images(self, image_list: list[torch.Tensor], device=None, dtype=None):
         if device is None:
             device = self.vae_device_torch
         if dtype is None:
@@ -580,7 +579,7 @@ class MageFlowModel(BaseModel):
     def get_base_model_version(self):
         return "mageflow"
 
-    def get_transformer_block_names(self) -> Optional[List[str]]:
+    def get_transformer_block_names(self) -> list[str] | None:
         return ["transformer_blocks"]
 
     lora_keys_use_comfy_prefix = True
