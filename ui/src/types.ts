@@ -258,6 +258,9 @@ export interface SampleConfig {
   num_frames: number;
   fps: number;
   duration?: number;
+  turbo_lora_path?: string;
+  manual_sigma_schedule?: number[] | string;
+  sigmas?: number[];
 }
 
 export interface LoggingConfig {

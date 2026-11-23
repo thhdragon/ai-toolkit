@@ -25,7 +25,7 @@ target resolution).
 import json
 import math
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional, Union
 
 import huggingface_hub
 import torch
@@ -281,6 +281,46 @@ class MageFlowModel(BaseModel):
         self.print_and_status_update("Model Loaded")
 
     # ------------------------------------------------------------------
+    # Turbo LoRA support
+    # ------------------------------------------------------------------
+    def _resolve_turbo_weight_path(self, turbo_path: str | None = None) -> str | None:
+        if turbo_path is None or not str(turbo_path).strip():
+            return None
+        candidate = str(turbo_path).strip()
+        if os.path.isabs(candidate) and os.path.exists(candidate):
+            return candidate
+        if os.path.exists(candidate):
+            return os.path.abspath(candidate)
+        loras_candidate = os.path.join("models", "loras", candidate)
+        if os.path.exists(loras_candidate):
+            return os.path.abspath(loras_candidate)
+        from toolkit.paths import MODELS_PATH
+        mpath_candidate = os.path.join(MODELS_PATH, "loras", candidate)
+        if os.path.exists(mpath_candidate):
+            return mpath_candidate
+        from toolkit.models.v2.resolver import resolve_lora_file
+        try:
+            resolved = resolve_lora_file(candidate, status_fn=self.print_and_status_update)
+            if resolved and os.path.exists(resolved):
+                return resolved
+        except Exception:
+            pass
+        if os.path.exists(candidate):
+            return candidate
+        raise FileNotFoundError(f"Turbo LoRA not found: {turbo_path}")
+
+    def _get_turbo_lora(self, weight_path: str):
+        if not hasattr(self, "_turbo_lora_cache"):
+            self._turbo_lora_cache = {}
+        if weight_path not in self._turbo_lora_cache:
+            from toolkit.inference_lora import InferenceLoRA
+            self.print_and_status_update(f"Loading turbo LoRA from {weight_path}")
+            lora = InferenceLoRA(weight_path)
+            lora.load(self, status_fn=self.print_and_status_update)
+            self._turbo_lora_cache[weight_path] = lora
+        return self._turbo_lora_cache[weight_path]
+
+    # ------------------------------------------------------------------
     # Generation (training previews)
     # ------------------------------------------------------------------
     def get_generation_pipeline(self):
@@ -328,17 +368,51 @@ class MageFlowModel(BaseModel):
                 )
             ]
 
-        img = pipeline(
-            conditional_embeds=conditional_embeds,
-            unconditional_embeds=unconditional_embeds,
-            height=gen_config.height,
-            width=gen_config.width,
-            num_inference_steps=gen_config.num_inference_steps,
-            guidance_scale=gen_config.guidance_scale,
-            latents=gen_config.latents,
-            generator=generator,
-            ref_latents=ref_latents,
-        )[0]
+        # Turbo LoRA support
+        turbo_path = gen_config.turbo_lora_path
+        if turbo_path is None and extra:
+            turbo_path = extra.get("turbo_lora_path", None)
+        if turbo_path is None:
+            turbo_path = self.model_config.model_kwargs.get("turbo_lora_path", None)
+
+        turbo_weight_path = self._resolve_turbo_weight_path(turbo_path) if turbo_path else None
+        turbo_lora = self._get_turbo_lora(turbo_weight_path) if turbo_weight_path else None
+
+        num_steps = gen_config.num_inference_steps
+        guidance_scale = gen_config.guidance_scale
+        sigmas = gen_config.sigmas
+
+        if turbo_lora is not None:
+            if sigmas is not None:
+                num_steps = len(sigmas)
+            else:
+                if num_steps in (20, 25, 28, 30, 50):
+                    num_steps = 4
+            if guidance_scale > 1.0 and (
+                guidance_scale in (3.5, 4.0, 5.0, 7.0, 7.5)
+                or not self.model_config.model_kwargs.get("keep_cfg_with_turbo", False)
+            ):
+                guidance_scale = 1.0
+
+        if turbo_lora is not None:
+            turbo_lora.attach()
+
+        try:
+            img = pipeline(
+                conditional_embeds=conditional_embeds,
+                unconditional_embeds=unconditional_embeds,
+                height=gen_config.height,
+                width=gen_config.width,
+                num_inference_steps=num_steps,
+                guidance_scale=guidance_scale,
+                latents=gen_config.latents,
+                generator=generator,
+                ref_latents=ref_latents,
+                sigmas=sigmas,
+            )[0]
+        finally:
+            if turbo_lora is not None:
+                turbo_lora.detach()
         return img
 
     # ------------------------------------------------------------------

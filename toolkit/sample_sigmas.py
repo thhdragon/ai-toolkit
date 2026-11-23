@@ -22,6 +22,8 @@ import torch
 def normalize_sample_sigmas(sigmas) -> Optional[List[float]]:
     if sigmas is None:
         return None
+    if isinstance(sigmas, str):
+        sigmas = [float(s.strip()) for s in sigmas.replace(',', ' ').split() if s.strip()]
     if isinstance(sigmas, (int, float)):
         sigmas = [sigmas]
     values = [float(s) for s in sigmas]

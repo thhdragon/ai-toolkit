@@ -222,7 +222,7 @@ export const getGenerateDefaults = (arch: ModelArch): GenerateDefaults => {
       if (value === undefined || value === null || value === '') continue;
       if (field === 'sample_steps') sample.num_inference_steps = value;
       else if (field === 'neg') sample.negative_prompt = value;
-      else if (['width', 'height', 'guidance_scale', 'num_frames', 'fps', 'duration'].includes(field))
+      else if (['width', 'height', 'guidance_scale', 'num_frames', 'fps', 'duration', 'turbo_lora_path', 'manual_sigma_schedule', 'sigmas'].includes(field))
         sample[field] = value;
     }
   }

@@ -160,6 +160,7 @@ class MageFlowPipeline:
         latents: Optional[torch.Tensor] = None,
         generator: Optional[torch.Generator] = None,
         ref_latents: Optional[List[List[torch.Tensor]]] = None,
+        sigmas: Optional[List[float]] = None,
         **kwargs,
     ) -> List[Image.Image]:
         model = self.model
@@ -191,7 +192,16 @@ class MageFlowPipeline:
                 f.to(device, dtype) for f in unconditional_embeds.text_embeds
             ]
 
-        sigmas = build_shifted_sigmas(num_inference_steps, shift=shift, device=device)
+        if sigmas is not None:
+            from toolkit.sample_sigmas import sigmas_with_terminal
+            if len(sigmas) > 0 and sigmas[-1] == 0.0:
+                sigmas_tensor = torch.tensor(sigmas, dtype=torch.float32, device=device)
+            else:
+                sigmas_tensor = torch.tensor(sigmas_with_terminal(sigmas), dtype=torch.float32, device=device)
+            num_inference_steps = len(sigmas_tensor) - 1
+            sigmas = sigmas_tensor
+        else:
+            sigmas = build_shifted_sigmas(num_inference_steps, shift=shift, device=device)
 
         # Euler integration of the flow ODE, sigma 1 -> 0 (with optional CFG:
         # v = uncond + cfg * (cond - uncond), reference convention).

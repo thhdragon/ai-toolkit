@@ -1610,6 +1610,37 @@ export default function SimpleJob({
                       required
                     />
                   )}
+                  <TextInput
+                    label="Turbo LoRA Path"
+                    className="pt-2"
+                    value={jobConfig.config.process[0].sample.turbo_lora_path ?? ''}
+                    onChange={value => {
+                      if (value?.trim() === '') value = undefined;
+                      setJobConfig(value, 'config.process[0].sample.turbo_lora_path');
+                    }}
+                    placeholder="eg. models/loras/mage-flow-turbo-4-steps.safetensors"
+                  />
+                  <TextInput
+                    label="Manual Sigma Schedule"
+                    className="pt-2"
+                    value={
+                      Array.isArray(jobConfig.config.process[0].sample.manual_sigma_schedule)
+                        ? jobConfig.config.process[0].sample.manual_sigma_schedule.join(', ')
+                        : (jobConfig.config.process[0].sample.manual_sigma_schedule ?? '')
+                    }
+                    onChange={value => {
+                      let val: number[] | undefined = undefined;
+                      if (value && value.trim() !== '') {
+                        const parsed = value
+                          .split(',')
+                          .map(v => parseFloat(v.trim()))
+                          .filter(v => !isNaN(v));
+                        if (parsed.length > 0) val = parsed;
+                      }
+                      setJobConfig(val, 'config.process[0].sample.manual_sigma_schedule');
+                    }}
+                    placeholder="eg. 1.0, 0.75, 0.5, 0.25"
+                  />
                   <Checkbox
                     label="Walk Seed"
                     className="pt-4 pl-2"

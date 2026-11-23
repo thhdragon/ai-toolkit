@@ -55,7 +55,11 @@ class SampleItem:
         self.seed: Optional[int] = kwargs.get('seed', None) # if none, default to autogen seed
         self.guidance_scale: float = kwargs.get('guidance_scale', sample_config.guidance_scale)
         self.sample_steps: int = kwargs.get('sample_steps', sample_config.sample_steps)
-        self.sigmas: Optional[List[float]] = kwargs.get('sigmas', sample_config.sigmas)
+        self.turbo_lora_path: Optional[str] = kwargs.get('turbo_lora_path', sample_config.turbo_lora_path)
+        self.manual_sigma_schedule = kwargs.get('manual_sigma_schedule', sample_config.manual_sigma_schedule)
+        sigmas_val = self.manual_sigma_schedule if self.manual_sigma_schedule is not None else kwargs.get('sigmas', sample_config.sigmas)
+        from toolkit.sample_sigmas import normalize_sample_sigmas
+        self.sigmas: Optional[List[float]] = normalize_sample_sigmas(sigmas_val)
         self.fps: int = kwargs.get('fps', sample_config.fps)
         self.num_frames: int = kwargs.get('num_frames', sample_config.num_frames)
         # audio models: max seconds to generate
@@ -91,8 +95,12 @@ class SampleConfig:
         self.walk_seed = kwargs.get('walk_seed', False)
         self.guidance_scale = kwargs.get('guidance_scale', 7)
         self.sample_steps = kwargs.get('sample_steps', 20)
+        self.turbo_lora_path: Optional[str] = kwargs.get('turbo_lora_path', kwargs.get('turbo_lora', None))
+        self.manual_sigma_schedule = kwargs.get('manual_sigma_schedule', kwargs.get('manual_sigmas', None))
         # explicit sigma schedule, 1.0 = pure noise, 0.0 = clean. Descending; the final 0.0 is added automatically, so [1.0, 0.5] = 2 steps. Overrides sample_steps
-        self.sigmas: Optional[List[float]] = kwargs.get('sigmas', None)
+        sigmas_val = self.manual_sigma_schedule if self.manual_sigma_schedule is not None else kwargs.get('sigmas', None)
+        from toolkit.sample_sigmas import normalize_sample_sigmas
+        self.sigmas: Optional[List[float]] = normalize_sample_sigmas(sigmas_val)
         self.network_multiplier = kwargs.get('network_multiplier', 1)
         self.guidance_rescale = kwargs.get('guidance_rescale', 0.0)
         self.ext: ImgExt = kwargs.get('format', 'jpg')
@@ -1189,10 +1197,16 @@ class GenerateImageConfig:
             ctrl_idx: int = 0,
             do_cfg_norm: bool = False,
             sigmas: Optional[List[float]] = None,  # explicit schedule; replaces num_inference_steps
+            turbo_lora_path: Optional[str] = None,
+            manual_sigma_schedule: Optional[Union[List[float], str]] = None,
     ):
         self.width: int = width
         self.height: int = height
         self.num_inference_steps: int = num_inference_steps
+        self.turbo_lora_path: Optional[str] = turbo_lora_path
+        self.manual_sigma_schedule = manual_sigma_schedule
+        if manual_sigma_schedule is not None and sigmas is None:
+            sigmas = manual_sigma_schedule
         from toolkit.sample_sigmas import normalize_sample_sigmas
         self.sigmas: Optional[List[float]] = normalize_sample_sigmas(sigmas)
         if self.sigmas is not None:
