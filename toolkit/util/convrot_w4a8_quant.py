@@ -58,11 +58,13 @@ _QUANT_ROW_ELEM_BUDGET = 1 << 22
 
 # ---------------------------------------------------------------- eager reference
 
-# int8 grid rounding in both kernels: one saturating cvt.rni.sat.s8 (round-nearest-even,
-# saturate to [-128, 127]) instead of rint + clamp(-127, 127). The two differ only for a
-# code whose group value rounds to <= -127.5, which the fp8 scale rounding makes possible
-# but never happened on any Qwen3.8 tensor measured; prefill and decode share the grid.
-W4A8_SAT = True
+# int8 grid rounding in both kernels: on CUDA, one saturating PTX cvt.rni.sat.s8
+# (round-nearest-even, saturate to [-128, 127]); on ROCm/HIP, PTX inline asm is
+# invalid AMDGCN, so use portable rint + clamp(-127, 127). The two differ only for
+# a code whose group value rounds to <= -127.5, which the fp8 scale rounding makes
+# possible but never happened on any Qwen3.8 tensor measured; prefill and decode
+# share the grid.
+W4A8_SAT = getattr(torch.version, "hip", None) is None
 
 
 def _pack_codes(codes: torch.Tensor) -> torch.Tensor:
