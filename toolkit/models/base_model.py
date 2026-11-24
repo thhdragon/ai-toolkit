@@ -103,6 +103,9 @@ class BaseModel:
     # rename LoRA keys transformer. <-> diffusion_model. (the ComfyUI-standard
     # prefix) on save/load
     lora_keys_use_comfy_prefix = False
+    # Native Resolution MMDiT (e.g. Mage-Flow): operates on native resolutions
+    # without discretizing into aspect ratio buckets or cropping to aspect ratio buckets.
+    is_nr_mmdit = False
     # text-generating models: the trainer runs train_llm_accumulation (model-owned
     # loss via get_llm_loss) instead of the diffusion step; no vae / text encoder
     is_llm = False

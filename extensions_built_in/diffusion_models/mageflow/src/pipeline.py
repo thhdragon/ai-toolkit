@@ -22,7 +22,7 @@ coordinates than their target, as in the reference ``generate_edits``.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 from einops import rearrange
@@ -57,25 +57,31 @@ def pack_text_features(
 
 def predict_velocity(
     model: MageFlow,
-    latents: torch.Tensor,  # (B, C, h, w) noisy target latents
+    latents: Union[torch.Tensor, List[torch.Tensor]],  # (B, C, h, w) or List of (C, h_i, w_i) noisy target latents
     t: torch.Tensor,  # (B,) flow sigma in [0, 1] (1 = pure noise)
     text_embeds: List[torch.Tensor],  # per-sample (L_i, D) Qwen3-VL features
     ref_latents: Optional[
         List[List[torch.Tensor]]
     ] = None,  # per-sample clean (C, hr, wr) refs
-) -> torch.Tensor:
+) -> Union[torch.Tensor, List[torch.Tensor]]:
     """Run the DiT on the packed [text | target(+refs)] sequences.
 
     Packs the batch into one varlen forward (mirroring reference packing:
     per-sample cu_seqlens isolate the samples inside the attention kernel).
     Reference latents, when given, are appended clean after each sample's
     target tokens; the returned velocity covers only the target tokens,
-    reshaped back to ``(B, C, h, w)``. No time flip / negation: Mage-Flow's
-    convention matches ai-toolkit's.
+    reshaped back to ``(B, C, h, w)`` or a list of ``(C, h_i, w_i)`` matching
+    input format. No time flip / negation: Mage-Flow's convention matches ai-toolkit's.
     """
-    device = latents.device
-    dtype = latents.dtype
-    b, c, h, w = latents.shape
+    is_list = isinstance(latents, list)
+    if is_list:
+        b = len(latents)
+        device = latents[0].device
+        dtype = latents[0].dtype
+    else:
+        device = latents.device
+        dtype = latents.dtype
+        b, c, h, w = latents.shape
 
     if ref_latents is not None and not any(len(r) > 0 for r in ref_latents):
         ref_latents = None
@@ -83,12 +89,16 @@ def predict_velocity(
     img_parts, samp_lens, shape_seq, target_idx_parts = [], [], [], []
     off = 0
     for i in range(b):
-        tgt = rearrange(latents[i], "c h w -> (h w) c")
+        cur_lat = latents[i]
+        if cur_lat.dim() == 4:
+            cur_lat = cur_lat.squeeze(0)
+        c_i, h_i, w_i = cur_lat.shape[-3:]
+        tgt = rearrange(cur_lat, "c h w -> (h w) c")
         img_parts.append(tgt)
-        shape_seq.append((1, h, w))
-        target_idx_parts.append(torch.arange(off, off + h * w, device=device))
-        samp_len = h * w
-        off += h * w
+        shape_seq.append((1, h_i, w_i))
+        target_idx_parts.append(torch.arange(off, off + h_i * w_i, device=device))
+        samp_len = h_i * w_i
+        off += h_i * w_i
         if ref_latents is not None:
             for ref in ref_latents[i]:
                 ref = ref.to(device, dtype)
@@ -115,8 +125,19 @@ def predict_velocity(
         txt_cu_seqlens=txt_cu,
     )  # [1, sum, C_out]
 
-    pred = out[:, target_idx, :]  # [1, B*h*w, C]
-    return rearrange(pred, "1 (b h w) c -> b c h w", b=b, h=h, w=w)
+    pred = out[:, target_idx, :]  # [1, sum(h_i*w_i), C]
+    if not is_list:
+        return rearrange(pred, "1 (b h w) c -> b c h w", b=b, h=h, w=w)
+    else:
+        preds = []
+        cur_idx = 0
+        for i in range(b):
+            c_i, h_i, w_i = latents[i].shape[-3:]
+            num_t = h_i * w_i
+            p = pred[:, cur_idx : cur_idx + num_t, :]
+            preds.append(rearrange(p, "1 (h w) c -> c h w", h=h_i, w=w_i))
+            cur_idx += num_t
+        return preds
 
 
 def build_shifted_sigmas(

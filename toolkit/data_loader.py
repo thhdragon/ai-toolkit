@@ -402,6 +402,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             config.bucket_tolerance = sd.get_bucket_divisibility()
         self.is_video = any(c.num_frames > 1 or c.auto_frame_count for c in self.source_configs)
         self.is_audio_model = hasattr(sd, 'is_audio_model') and sd.is_audio_model if sd is not None else False
+        self.is_nr_mmdit = getattr(sd, 'is_nr_mmdit', False) if sd is not None else False
         # text-generating multimodal models take audio, image and video files in one dataset
         self.is_multimodal_llm = getattr(sd, 'is_multimodal_llm', False) if sd is not None else False
         super().__init__()
@@ -559,6 +560,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                     sd=self.sd,
                     path=file,
                     is_audio_model=self.is_audio_model or (self.is_multimodal_llm and file.lower().endswith(tuple(audio_extensions))),
+                    is_nr_mmdit=self.is_nr_mmdit,
                     dataset_config=dataset_config,
                     dataloader_transforms=transform,
                     size_database=size_database,

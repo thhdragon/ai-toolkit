@@ -99,6 +99,7 @@ class MageFlowModel(BaseModel):
     arch = "mageflow"
     is_edit = False
     use_old_lokr_format = False
+    is_nr_mmdit = True
 
     def __init__(
         self,
@@ -114,6 +115,7 @@ class MageFlowModel(BaseModel):
         )
         self.is_flow_matching = True
         self.is_transformer = True
+        self.is_nr_mmdit = True
         self.target_lora_modules = ["MageFlow"]
 
         # MageVAE is 16x downsampling; the DiT patch size is 1 (one token per
@@ -491,7 +493,7 @@ class MageFlowModel(BaseModel):
     # ------------------------------------------------------------------
     def get_noise_prediction(
         self,
-        latent_model_input: torch.Tensor,  # (B, 128, h, w)
+        latent_model_input: Union[torch.Tensor, List[torch.Tensor]],  # (B, 128, h, w) or List of (128, h, w) / (1, 128, h, w)
         timestep: torch.Tensor,  # 0..1000 scale
         text_embeddings: AdvancedPromptEmbeds,
         batch: "DataLoaderBatchDTO" = None,
@@ -505,10 +507,16 @@ class MageFlowModel(BaseModel):
         ref_latents = None
         if batch is not None and self.is_edit:
             with torch.no_grad():
-                _, _, lh, lw = latent_model_input.shape
+                if isinstance(latent_model_input, list):
+                    first_latent = latent_model_input[0]
+                    lh, lw = first_latent.shape[-2], first_latent.shape[-1]
+                    batch_sz = len(latent_model_input)
+                else:
+                    _, _, lh, lw = latent_model_input.shape
+                    batch_sz = latent_model_input.shape[0]
                 ref_latents = self._batch_ref_latents_from_batch(
                     batch,
-                    latent_model_input.shape[0],
+                    batch_sz,
                     target_height=lh * self.vae_scale_factor,
                     target_width=lw * self.vae_scale_factor,
                 )
@@ -518,12 +526,18 @@ class MageFlowModel(BaseModel):
         t = timestep.to(self.device_torch, dtype=torch.float32) / 1000.0
         if t.dim() == 0:
             t = t.unsqueeze(0)
-        if t.shape[0] != latent_model_input.shape[0]:
-            t = t.expand(latent_model_input.shape[0])
+        b_len = len(latent_model_input) if isinstance(latent_model_input, list) else latent_model_input.shape[0]
+        if t.shape[0] != b_len:
+            t = t.expand(b_len)
+
+        if isinstance(latent_model_input, list):
+            latents_in = [x.to(self.device_torch, self.torch_dtype) for x in latent_model_input]
+        else:
+            latents_in = latent_model_input.to(self.device_torch, self.torch_dtype)
 
         pred = predict_velocity(
             self.transformer,
-            latent_model_input.to(self.device_torch, self.torch_dtype),
+            latents_in,
             t,
             text_embeddings.text_embeds,
             ref_latents=ref_latents,

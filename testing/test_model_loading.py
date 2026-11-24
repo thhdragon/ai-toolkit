@@ -40,7 +40,13 @@ OUTPUT_ROOT = os.path.join(TOOLKIT_ROOT, "testing", ".model_test_outputs")
 # Keep samples tiny: this asserts the load/encode/denoise/decode/save path
 # works, not quality.
 IMG = {"width": 512, "height": 512, "num_inference_steps": 8, "seed": 42}
-VID = {"width": 256, "height": 256, "num_inference_steps": 6, "seed": 42, "num_frames": 9}
+VID = {
+    "width": 256,
+    "height": 256,
+    "num_inference_steps": 6,
+    "seed": 42,
+    "num_frames": 9,
+}
 
 MODEL_TESTS = {
     "zimage": {
@@ -49,111 +55,303 @@ MODEL_TESTS = {
     },
     "qwen_image": {
         # 20B: quantize to fit a 32GB card
-        "model": {"name_or_path": "Qwen/Qwen-Image", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "Qwen/Qwen-Image",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 4.0},
     },
     "krea2": {
-        "model": {"name_or_path": "krea/Krea-2-Turbo", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "krea/Krea-2-Turbo",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": {**IMG, "guidance_scale": 1.0},
     },
     "boogu_image": {
         # native ~1024; 512/low-step/high-CFG degenerates to a black frame
-        "model": {"name_or_path": "Boogu/Boogu-Image-0.1-Base", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 4.0, "seed": 42},
+        "model": {
+            "name_or_path": "Boogu/Boogu-Image-0.1-Base",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 4.0,
+            "seed": 42,
+        },
     },
     "ernie_image": {
-        "model": {"name_or_path": "baidu/ERNIE-Image", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 4.0, "seed": 42},
+        "model": {
+            "name_or_path": "baidu/ERNIE-Image",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 4.0,
+            "seed": 42,
+        },
     },
     "mageflow": {
-        "model": {"name_or_path": "microsoft/Mage-Flow-Base", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "mage-flow-community/Mage-Flow-Base",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": IMG,
     },
     "ideogram4": {
-        "model": {"name_or_path": "ideogram-ai/ideogram-4-fp8", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 4.0, "seed": 42},
+        "model": {
+            "name_or_path": "ideogram-ai/ideogram-4-fp8",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 4.0,
+            "seed": 42,
+        },
     },
     "hidream_o1": {
-        "model": {"name_or_path": "HiDream-ai/HiDream-O1-Image", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 28, "guidance_scale": 5.0, "seed": 42},
+        "model": {
+            "name_or_path": "HiDream-ai/HiDream-O1-Image",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 28,
+            "guidance_scale": 5.0,
+            "seed": 42,
+        },
     },
     "anima": {
         "model": {"name_or_path": "circlestone-labs/Anima-Base-v1.0-Diffusers"},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 4.5, "seed": 42},
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 4.5,
+            "seed": 42,
+        },
     },
     "wan21": {
         "model": {"name_or_path": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"},
-        "sample": {"width": 480, "height": 480, "num_inference_steps": 20, "guidance_scale": 5.0, "seed": 42, "num_frames": 17},
+        "sample": {
+            "width": 480,
+            "height": 480,
+            "num_inference_steps": 20,
+            "guidance_scale": 5.0,
+            "seed": 42,
+            "num_frames": 17,
+        },
     },
     "wan22_5b": {
-        "model": {"name_or_path": "Wan-AI/Wan2.2-TI2V-5B-Diffusers", "quantize": True, "quantize_te": True},
-        "sample": {"width": 480, "height": 480, "num_inference_steps": 20, "guidance_scale": 5.0, "seed": 42, "num_frames": 17},
+        "model": {
+            "name_or_path": "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 480,
+            "height": 480,
+            "num_inference_steps": 20,
+            "guidance_scale": 5.0,
+            "seed": 42,
+            "num_frames": 17,
+        },
     },
     "ltx2.3": {
         # even quantized, the 22B stack does not fit a 32GB card — needs the big GPU
-        "model": {"name_or_path": "Lightricks/LTX-2.3/ltx-2.3-22b-dev.safetensors", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 3.0, "seed": 42, "num_frames": 25},
+        "model": {
+            "name_or_path": "Lightricks/LTX-2.3/ltx-2.3-22b-dev.safetensors",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 3.0,
+            "seed": 42,
+            "num_frames": 25,
+        },
     },
     # single-file / comfy-layout archs: weights resolve under MODELS_PATH (or
     # download there with --allow-download)
     "chroma": {
-        "model": {"name_or_path": "lodestones/Chroma1-HD", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "lodestones/Chroma1-HD",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": {**IMG, "num_inference_steps": 26, "guidance_scale": 4.0},
     },
     "flux_kontext": {
-        "model": {"name_or_path": "black-forest-labs/FLUX.1-Kontext-dev", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "black-forest-labs/FLUX.1-Kontext-dev",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 2.5},
         "needs_control_image": True,
     },
     "flux2_klein_4b": {
-        "model": {"name_or_path": "black-forest-labs/FLUX.2-klein-base-4B", "quantize_te": True},
+        "model": {
+            "name_or_path": "black-forest-labs/FLUX.2-klein-base-4B",
+            "quantize_te": True,
+        },
         "sample": {**IMG, "num_inference_steps": 25, "guidance_scale": 4.0},
     },
     # ---- coverage for every UI-default arch (big downloads on first run) ----
     "wan22_14b": {
-        "model": {"name_or_path": "ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16", "quantize": True, "quantize_te": True, "low_vram": True},
-        "sample": {"width": 480, "height": 480, "num_inference_steps": 20, "guidance_scale": 3.5, "seed": 42, "num_frames": 17},
+        "model": {
+            "name_or_path": "ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16",
+            "quantize": True,
+            "quantize_te": True,
+            "low_vram": True,
+        },
+        "sample": {
+            "width": 480,
+            "height": 480,
+            "num_inference_steps": 20,
+            "guidance_scale": 3.5,
+            "seed": 42,
+            "num_frames": 17,
+        },
     },
     "wan22_14b_i2v": {
-        "model": {"name_or_path": "ai-toolkit/Wan2.2-I2V-A14B-Diffusers-bf16", "quantize": True, "quantize_te": True, "low_vram": True},
-        "sample": {"width": 480, "height": 480, "num_inference_steps": 20, "guidance_scale": 3.5, "seed": 42, "num_frames": 17},
+        "model": {
+            "name_or_path": "ai-toolkit/Wan2.2-I2V-A14B-Diffusers-bf16",
+            "quantize": True,
+            "quantize_te": True,
+            "low_vram": True,
+        },
+        "sample": {
+            "width": 480,
+            "height": 480,
+            "num_inference_steps": 20,
+            "guidance_scale": 3.5,
+            "seed": 42,
+            "num_frames": 17,
+        },
         "needs_control_image": True,
     },
     "wan21_i2v": {
-        "model": {"name_or_path": "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers", "quantize": True, "quantize_te": True},
-        "sample": {"width": 480, "height": 480, "num_inference_steps": 20, "guidance_scale": 5.0, "seed": 42, "num_frames": 17},
+        "model": {
+            "name_or_path": "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 480,
+            "height": 480,
+            "num_inference_steps": 20,
+            "guidance_scale": 5.0,
+            "seed": 42,
+            "num_frames": 17,
+        },
         "needs_control_image": True,
     },
     "hidream": {
-        "model": {"name_or_path": "HiDream-ai/HiDream-I1-Full", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 28, "guidance_scale": 5.0, "seed": 42},
+        "model": {
+            "name_or_path": "HiDream-ai/HiDream-I1-Full",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 28,
+            "guidance_scale": 5.0,
+            "seed": 42,
+        },
     },
     "hidream_e1": {
         # editing seq budget fits 768x768 (source+target concat)
-        "model": {"name_or_path": "HiDream-ai/HiDream-E1-1", "quantize": True, "quantize_te": True},
-        "sample": {"width": 768, "height": 768, "num_inference_steps": 28, "guidance_scale": 5.0, "seed": 42},
+        "model": {
+            "name_or_path": "HiDream-ai/HiDream-E1-1",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 768,
+            "height": 768,
+            "num_inference_steps": 28,
+            "guidance_scale": 5.0,
+            "seed": 42,
+        },
         "needs_control_image": True,
         # native editing seq assert: other resolutions hard-fail
         "size_locked": True,
     },
     "nucleus_image": {
-        "model": {"name_or_path": "NucleusAI/Nucleus-Image", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 4.0, "seed": 42},
+        "model": {
+            "name_or_path": "NucleusAI/Nucleus-Image",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 4.0,
+            "seed": 42,
+        },
     },
     "omnigen2": {
-        "model": {"name_or_path": "OmniGen2/OmniGen2", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 4.0, "seed": 42},
+        "model": {
+            "name_or_path": "OmniGen2/OmniGen2",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 4.0,
+            "seed": 42,
+        },
     },
     "ltx2.5": {
-        "model": {"name_or_path": "Lightricks/LTX-2.5", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 3.0, "seed": 42, "num_frames": 25},
+        "model": {
+            "name_or_path": "Lightricks/LTX-2.5",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 3.0,
+            "seed": 42,
+            "num_frames": 25,
+        },
     },
     "flux2": {
-        "model": {"name_or_path": "black-forest-labs/FLUX.2-dev", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "black-forest-labs/FLUX.2-dev",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": {**IMG, "num_inference_steps": 25, "guidance_scale": 4.0},
     },
     "flux2_klein_9b": {
-        "model": {"name_or_path": "black-forest-labs/FLUX.2-klein-base-9B", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "black-forest-labs/FLUX.2-klein-base-9B",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": {**IMG, "num_inference_steps": 25, "guidance_scale": 4.0},
     },
     "prx_pixel": {
@@ -165,25 +363,46 @@ MODEL_TESTS = {
         "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 3.0},
     },
     "zeta_chroma": {
-        "model": {"name_or_path": "lodestones/Zeta-Chroma/zeta-chroma-base-x0-pixel-dino-distance.safetensors", "extras_name_or_path": "Tongyi-MAI/Z-Image-Turbo", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "lodestones/Zeta-Chroma/zeta-chroma-base-x0-pixel-dino-distance.safetensors",
+            "extras_name_or_path": "Tongyi-MAI/Z-Image-Turbo",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": {**IMG, "num_inference_steps": 25, "guidance_scale": 4.0},
     },
     "zimage_l2p": {
-        "model": {"name_or_path": "zhen-nan/L2P/model-1k-merge.safetensors", "extras_name_or_path": "Tongyi-MAI/Z-Image-Turbo", "quantize_te": True},
+        "model": {
+            "name_or_path": "zhen-nan/L2P/model-1k-merge.safetensors",
+            "extras_name_or_path": "Tongyi-MAI/Z-Image-Turbo",
+            "quantize_te": True,
+        },
         "sample": {**IMG, "guidance_scale": 1.0},
     },
     "qwen_image_edit": {
-        "model": {"name_or_path": "Qwen/Qwen-Image-Edit", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "Qwen/Qwen-Image-Edit",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 4.0},
         "needs_control_image": True,
     },
     "qwen_image_edit_plus": {
-        "model": {"name_or_path": "Qwen/Qwen-Image-Edit-2509", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "Qwen/Qwen-Image-Edit-2509",
+            "quantize": True,
+            "quantize_te": True,
+        },
         "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 4.0},
         "needs_control_image": True,
     },
     "qwen_image_2": {
-        "model": {"name_or_path": "Comfy-Org/Qwen-Image-2.1", "quantize": True, "quantize_te": True},
+        "model": {
+            "name_or_path": "Comfy-Org/Qwen-Image-2.1",
+            "quantize": True,
+            "quantize_te": True,
+        },
         # 2.1 is meant to be sampled without guidance. One arch: the control
         # image exercises the reference path, which plain t2i is a subset of
         "sample": {**IMG, "num_inference_steps": 20, "guidance_scale": 1.0},
@@ -304,24 +523,67 @@ MODEL_TESTS = {
     # ---- legacy monolith archs (components adopted into v2 on load) ----
     "sd1": {
         "model": {"name_or_path": "stable-diffusion-v1-5/stable-diffusion-v1-5"},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 20, "guidance_scale": 7.5, "seed": 42},
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 20,
+            "guidance_scale": 7.5,
+            "seed": 42,
+        },
     },
     "sdxl": {
         "model": {"name_or_path": "stabilityai/stable-diffusion-xl-base-1.0"},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 6.0, "seed": 42},
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 6.0,
+            "seed": 42,
+        },
     },
     "ace_step_15": {
-        "model": {"name_or_path": "ostris/ace_step_1.5_ComfyUI_files/ace_step_1.5_base_aio.safetensors", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 20, "guidance_scale": 4.0, "seed": 42},
+        "model": {
+            "name_or_path": "ostris/ace_step_1.5_ComfyUI_files/ace_step_1.5_base_aio.safetensors",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 20,
+            "guidance_scale": 4.0,
+            "seed": 42,
+        },
     },
     "yue2": {
         # untagged test prompt = style only; keep the AR budget short for the smoke run
-        "model": {"name_or_path": "Comfy-Org/YuE2/checkpoints/yue2_3b_int8_convrot.safetensors", "quantize": True, "qtype": "convrot8", "model_kwargs": {"sample_max_seconds": 15, "cot": "off"}},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 16, "guidance_scale": 1.0, "seed": 42},
+        "model": {
+            "name_or_path": "Comfy-Org/YuE2/checkpoints/yue2_3b_int8_convrot.safetensors",
+            "quantize": True,
+            "qtype": "convrot8",
+            "model_kwargs": {"sample_max_seconds": 15, "cot": "off"},
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 16,
+            "guidance_scale": 1.0,
+            "seed": 42,
+        },
     },
     "f-lite": {
-        "model": {"name_or_path": "Freepik/F-Lite", "quantize": True, "quantize_te": True},
-        "sample": {"width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 4.0, "seed": 42},
+        "model": {
+            "name_or_path": "Freepik/F-Lite",
+            "quantize": True,
+            "quantize_te": True,
+        },
+        "sample": {
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 25,
+            "guidance_scale": 4.0,
+            "seed": 42,
+        },
     },
 }
 
@@ -495,8 +757,18 @@ def run_one(
         # errors but NOT broken quantized kernels (those need the sample)
         stages = prof.finish()
         return _finish_result(
-            arch, out_dir, model_config, model_kwargs, load_seconds,
-            None, None, 0, stages, load_profile, None, None,
+            arch,
+            out_dir,
+            model_config,
+            model_kwargs,
+            load_seconds,
+            None,
+            None,
+            0,
+            stages,
+            load_profile,
+            None,
+            None,
             require_output=False,
         )
 
@@ -521,9 +793,18 @@ def run_one(
     if quant_only:
         stages = prof.finish()
         return _finish_result(
-            arch, out_dir, model_config, model_kwargs, load_seconds,
-            gen_seconds, offload_seconds, attached, stages,
-            load_profile, gen_profile, offload_profile,
+            arch,
+            out_dir,
+            model_config,
+            model_kwargs,
+            load_seconds,
+            gen_seconds,
+            offload_seconds,
+            attached,
+            stages,
+            load_profile,
+            gen_profile,
+            offload_profile,
         )
 
     from toolkit.memory_management import MemoryManager
@@ -587,16 +868,35 @@ def run_one(
 
     stages = prof.finish()
     return _finish_result(
-        arch, out_dir, model_config, model_kwargs, load_seconds,
-        gen_seconds, offload_seconds, attached, stages,
-        load_profile, gen_profile, offload_profile,
+        arch,
+        out_dir,
+        model_config,
+        model_kwargs,
+        load_seconds,
+        gen_seconds,
+        offload_seconds,
+        attached,
+        stages,
+        load_profile,
+        gen_profile,
+        offload_profile,
     )
 
 
 def _finish_result(
-    arch, out_dir, model_config, model_kwargs, load_seconds, gen_seconds,
-    offload_seconds, attached, stages, load_profile, gen_profile,
-    offload_profile, require_output=True,
+    arch,
+    out_dir,
+    model_config,
+    model_kwargs,
+    load_seconds,
+    gen_seconds,
+    offload_seconds,
+    attached,
+    stages,
+    load_profile,
+    gen_profile,
+    offload_profile,
+    require_output=True,
 ):
     import torch
 
@@ -651,8 +951,15 @@ def format_stage_table(stages) -> str:
     """Aligned markdown table: stage column left-aligned, numbers right-aligned
     with fixed decimals so they line up in the terminal too."""
     headers = [
-        "stage", "seconds", "vram peak GB", "vram resv GB", "vram end GB",
-        "rss peak GB", "cpu avg %", "cpu max %", "threads",
+        "stage",
+        "seconds",
+        "vram peak GB",
+        "vram resv GB",
+        "vram end GB",
+        "rss peak GB",
+        "cpu avg %",
+        "cpu max %",
+        "threads",
     ]
 
     def fmt(value, decimals):
@@ -687,10 +994,14 @@ def format_stage_table(stages) -> str:
             out.append(cell.ljust(widths[i]) if i == 0 else cell.rjust(widths[i]))
         return "| " + " | ".join(out) + " |"
 
-    sep = "|" + "|".join(
-        (":" + "-" * (w + 1)) if i == 0 else ("-" * (w + 1) + ":")
-        for i, w in enumerate(widths)
-    ) + "|"
+    sep = (
+        "|"
+        + "|".join(
+            (":" + "-" * (w + 1)) if i == 0 else ("-" * (w + 1) + ":")
+            for i, w in enumerate(widths)
+        )
+        + "|"
+    )
     return "\n".join([line(headers), sep] + [line(r) for r in rows])
 
 
@@ -720,9 +1031,7 @@ def write_report(results, path):
     ]
     for r in results:
         if r["status"] != "PASS" or "stages" not in r:
-            lines.append(
-                f"| {r['arch']} | {r['status']} | - | - | - | - | - | - | "
-            )
+            lines.append(f"| {r['arch']} | {r['status']} | - | - | - | - | - | - | ")
             continue
         stages = r["stages"]
         quant = [s for s in stages if "uantiz" in s["name"]]
@@ -848,10 +1157,17 @@ def main():
                     OUTPUT_ROOT, f".{arch.replace('/', '_')}.{qt}.result.json"
                 )
                 cmd = [
-                    sys.executable, os.path.abspath(__file__),
-                    "--arch", arch, "--device", args.device,
-                    "--qtype-override", qt, "--quant-test",
-                    "--json-result", result_path,
+                    sys.executable,
+                    os.path.abspath(__file__),
+                    "--arch",
+                    arch,
+                    "--device",
+                    args.device,
+                    "--qtype-override",
+                    qt,
+                    "--quant-test",
+                    "--json-result",
+                    result_path,
                 ]
                 if args.allow_download:
                     cmd.append("--allow-download")
@@ -900,7 +1216,11 @@ def main():
             )
         except BaseException as err:
             status = classify_error(err)
-            result = {"arch": args.arch, "status": status, "error": f"{type(err).__name__}: {err}"}
+            result = {
+                "arch": args.arch,
+                "status": status,
+                "error": f"{type(err).__name__}: {err}",
+            }
             if status == "FAIL":
                 import traceback
 
@@ -912,7 +1232,10 @@ def main():
             print()
             print(format_stage_table(result["stages"]))
             print()
-        print(f"[{result['status']}] {args.arch}" + (f" — {result.get('error', '')}" if result["status"] != "PASS" else ""))
+        print(
+            f"[{result['status']}] {args.arch}"
+            + (f" — {result.get('error', '')}" if result["status"] != "PASS" else "")
+        )
         if result["status"] == "FAIL":
             sys.exit(1)
         return
@@ -929,7 +1252,9 @@ def main():
     for i, arch in enumerate(MODEL_TESTS, start=1):
         # flush so tail -f shows headers/progress live when stdout is a file
         print(f"\n===== {arch} ({i}/{total}) =====", flush=True)
-        result_path = os.path.join(OUTPUT_ROOT, f".{arch.replace('/', '_')}.result.json")
+        result_path = os.path.join(
+            OUTPUT_ROOT, f".{arch.replace('/', '_')}.result.json"
+        )
         cmd = [
             sys.executable,
             os.path.abspath(__file__),
@@ -949,7 +1274,11 @@ def main():
             os.remove(result_path)
         else:
             results.append(
-                {"arch": arch, "status": "FAIL", "error": f"subprocess died (exit {proc.returncode})"}
+                {
+                    "arch": arch,
+                    "status": "FAIL",
+                    "error": f"subprocess died (exit {proc.returncode})",
+                }
             )
 
         # running tally so a long sweep always shows how far along it is
@@ -973,7 +1302,9 @@ def main():
         if r["status"] != "PASS":
             line += f" — {r.get('error', '')[:160]}"
         print(line)
-    print(f"\n{counts['PASS']} passed, {counts['FAIL']} failed, {counts['SKIP']} skipped")
+    print(
+        f"\n{counts['PASS']} passed, {counts['FAIL']} failed, {counts['SKIP']} skipped"
+    )
 
     report_path = write_report(results, os.path.join(OUTPUT_ROOT, "report.md"))
     print(f"report: {report_path}")

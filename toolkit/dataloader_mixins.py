@@ -20,7 +20,7 @@ from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection, Sigl
 
 from toolkit.audio.preserve_pitch import time_stretch_preserve_pitch
 from toolkit.basic import UnusableFileError, flush, value_map
-from toolkit.buckets import get_bucket_for_image_size, get_resolution
+from toolkit.buckets import get_bucket_for_image_size, get_native_resolution_for_image_size, get_resolution
 from toolkit.config_modules import ControlTypes
 from toolkit.control_generator import ControlGenerator
 from toolkit.dto import DTO, DISK_PREFIX
@@ -239,14 +239,19 @@ class BucketsMixin:
 
     def build_batch_indices(self: 'AiToolkitDataset'):
         self.batch_indices = []
+        is_nr = getattr(self, 'is_nr_mmdit', False)
         for key, bucket in self.buckets.items():
-            for start_idx in range(0, len(bucket.file_list_idx), self.batch_size):
-                end_idx = min(start_idx + self.batch_size, len(bucket.file_list_idx))
+            # NR-MMDiT models retain native resolution per image. When images have diverse
+            # native shapes, they cannot be stacked into uniform 4D tensors per batch,
+            # so each batch item is processed individually (batch_size=1).
+            effective_batch_size = 1 if is_nr else self.batch_size
+            for start_idx in range(0, len(bucket.file_list_idx), effective_batch_size):
+                end_idx = min(start_idx + effective_batch_size, len(bucket.file_list_idx))
                 batch = bucket.file_list_idx[start_idx:end_idx]
                 # if the bucket has fewer items left than the requested batch size,
                 # duplicate items from this batch to pad it up to batch_size
-                if len(batch) < self.batch_size and len(batch) > 0:
-                    pad = [batch[i % len(batch)] for i in range(self.batch_size - len(batch))]
+                if len(batch) < effective_batch_size and len(batch) > 0:
+                    pad = [batch[i % len(batch)] for i in range(effective_batch_size - len(batch))]
                     batch = batch + pad
                 self.batch_indices.append(batch)
 
@@ -287,6 +292,48 @@ class BucketsMixin:
                 bucket_key = f"{file_item.width}ms{key_suffix}"
                 if bucket_key not in self.buckets:
                     self.buckets[bucket_key] = Bucket(file_item.width, 1)
+                self.buckets[bucket_key].file_list_idx.append(idx)
+                continue
+            if getattr(file_item, 'is_nr_mmdit', False):
+                resolution = item_config.resolution
+                width = int(file_item.width * item_config.scale)
+                height = int(file_item.height * item_config.scale)
+
+                if item_config.square_crop:
+                    # we scale first so smallest size matches resolution
+                    scale_factor_x = resolution / width
+                    scale_factor_y = resolution / height
+                    scale_factor = max(scale_factor_x, scale_factor_y)
+                    file_item.scale_to_width = math.ceil(width * scale_factor)
+                    file_item.scale_to_height = math.ceil(height * scale_factor)
+                    file_item.crop_width = resolution
+                    file_item.crop_height = resolution
+                    if width > height:
+                        file_item.crop_x = int(file_item.scale_to_width / 2 - resolution / 2)
+                        file_item.crop_y = 0
+                    else:
+                        file_item.crop_x = 0
+                        file_item.crop_y = int(file_item.scale_to_height / 2 - resolution / 2)
+                else:
+                    # NR-MMDiT models (e.g. Mage-Flow) preserve native aspect ratio
+                    # without aspect ratio quantization or cropping, and do not bucket
+                    # images by resolution or aspect ratio.
+                    native_res = get_native_resolution_for_image_size(
+                        width=width,
+                        height=height,
+                        resolution=resolution,
+                        divisibility=bucket_tolerance,
+                    )
+                    file_item.scale_to_width = native_res["width"]
+                    file_item.scale_to_height = native_res["height"]
+                    file_item.crop_width = native_res["width"]
+                    file_item.crop_height = native_res["height"]
+                    file_item.crop_x = 0
+                    file_item.crop_y = 0
+
+                bucket_key = f'nr{key_suffix}'
+                if bucket_key not in self.buckets:
+                    self.buckets[bucket_key] = Bucket(file_item.crop_width, file_item.crop_height)
                 self.buckets[bucket_key].file_list_idx.append(idx)
                 continue
             resolution = item_config.resolution

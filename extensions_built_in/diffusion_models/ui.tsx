@@ -2806,7 +2806,7 @@ export const AI_TOOLKIT_UI_MODELS: ModelArch[] = [
     group: "image",
     defaults: {
       "config.process[0].model.name_or_path": [
-        "microsoft/Mage-Flow-Base",
+        "mage-flow-community/Mage-Flow-Base",
         defaultNameOrPath,
       ],
       "config.process[0].model.quantize": [true, false],
@@ -2827,7 +2827,7 @@ export const AI_TOOLKIT_UI_MODELS: ModelArch[] = [
     group: "instruction",
     defaults: {
       "config.process[0].model.name_or_path": [
-        "microsoft/Mage-Flow-Edit-Base",
+        "mage-flow-community/Mage-Flow-Edit-Base",
         defaultNameOrPath,
       ],
       "config.process[0].model.quantize": [true, false],

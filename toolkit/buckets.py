@@ -46,3 +46,24 @@ def get_bucket_for_image_size(
     )
 
     return {"width": new_width, "height": new_height}
+
+
+def get_native_resolution_for_image_size(
+    width: int, height: int, resolution: int = 512, divisibility: int = 16
+) -> BucketResolution:
+    """Calculates target dimensions for a native resolution model (NR-MMDiT).
+    Preserves native aspect ratio without aspect ratio quantization or cropping,
+    scaling down only if total pixels exceed resolution * resolution, and
+    snapping both dimensions to divisibility.
+    """
+    total_pixels = width * height
+    max_pixels = resolution * resolution
+    if total_pixels > max_pixels:
+        scale = math.sqrt(max_pixels / total_pixels)
+        target_w = max(divisibility, round((width * scale) / divisibility) * divisibility)
+        target_h = max(divisibility, round((height * scale) / divisibility) * divisibility)
+    else:
+        target_w = max(divisibility, round(width / divisibility) * divisibility)
+        target_h = max(divisibility, round(height / divisibility) * divisibility)
+    return {"width": target_w, "height": target_h}
+

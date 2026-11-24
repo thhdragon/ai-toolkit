@@ -25,7 +25,7 @@ from huggingface_hub import HfApi, interpreter_login
 from toolkit.memory_management import MemoryManager
 
 from toolkit.basic import value_map
-from toolkit.buckets import get_bucket_for_image_size
+from toolkit.buckets import get_bucket_for_image_size, get_native_resolution_for_image_size
 from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.data_loader import get_dataloader_from_datasets, trigger_dataloader_setup_epoch
@@ -1605,14 +1605,22 @@ class BaseSDTrainProcess(BaseTrainProcess):
         for item in validation_items:
             img = Image.open(item.image_path)
             img = ImageOps.exif_transpose(img).convert('RGB')
-            # deterministic resize that keeps the aspect ratio, matches the pixel budget
-            # of the resolution and the bucket divisibility of the model
-            bucket = get_bucket_for_image_size(
-                img.width, img.height,
-                resolution=resolution,
-                divisibility=divisibility,
-            )
-            img = img.resize((bucket['width'], bucket['height']), Image.BICUBIC)
+            if getattr(self.sd, 'is_nr_mmdit', False):
+                native_res = get_native_resolution_for_image_size(
+                    img.width, img.height,
+                    resolution=resolution,
+                    divisibility=divisibility,
+                )
+                img = img.resize((native_res['width'], native_res['height']), Image.BICUBIC)
+            else:
+                # deterministic resize that keeps the aspect ratio, matches the pixel budget
+                # of the resolution and the bucket divisibility of the model
+                bucket = get_bucket_for_image_size(
+                    img.width, img.height,
+                    resolution=resolution,
+                    divisibility=divisibility,
+                )
+                img = img.resize((bucket['width'], bucket['height']), Image.BICUBIC)
             tensor = transforms.ToTensor()(img) * 2.0 - 1.0
             image_list.append(tensor)
             prompt = item.prompt
