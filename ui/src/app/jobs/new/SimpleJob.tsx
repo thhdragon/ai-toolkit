@@ -640,38 +640,118 @@ export default function SimpleJob({
               </>
             )}
           </Card>
-          {!disableSections.includes('slider') && (
-            <Card title="Slider">
-              <TextInput
-                label="Target Class"
-                className=""
-                value={jobConfig.config.process[0].slider?.target_class ?? ''}
-                onChange={value => setJobConfig(value, 'config.process[0].slider.target_class')}
-                placeholder="eg. person"
-              />
-              <TextInput
-                label="Positive Prompt"
-                className=""
-                value={jobConfig.config.process[0].slider?.positive_prompt ?? ''}
-                onChange={value => setJobConfig(value, 'config.process[0].slider.positive_prompt')}
-                placeholder="eg. person who is happy"
-              />
-              <TextInput
-                label="Negative Prompt"
-                className=""
-                value={jobConfig.config.process[0].slider?.negative_prompt ?? ''}
-                onChange={value => setJobConfig(value, 'config.process[0].slider.negative_prompt')}
-                placeholder="eg. person who is sad"
-              />
-              <TextInput
-                label="Anchor Class"
-                className=""
-                value={jobConfig.config.process[0].slider?.anchor_class ?? ''}
-                onChange={value => setJobConfig(value, 'config.process[0].slider.anchor_class')}
-                placeholder=""
-              />
-            </Card>
-          )}
+          {!disableSections.includes('slider') && (() => {
+            const sliderConfig = jobConfig.config.process[0].slider;
+            const sliderPromptPairs =
+              Array.isArray(sliderConfig?.prompt_pairs) && sliderConfig.prompt_pairs.length > 0
+                ? sliderConfig.prompt_pairs
+                : [
+                    {
+                      positive_prompt: sliderConfig?.positive_prompt ?? '',
+                      negative_prompt: sliderConfig?.negative_prompt ?? '',
+                      shuffle: false,
+                    },
+                  ];
+            const updateSliderPromptPairs = (
+              nextPairs: { positive_prompt: string; negative_prompt: string; shuffle?: boolean }[],
+            ) => {
+              const nextSlider = { ...(sliderConfig ?? {}), prompt_pairs: nextPairs };
+              delete nextSlider.positive_prompt;
+              delete nextSlider.negative_prompt;
+              setJobConfig(nextSlider, 'config.process[0].slider');
+            };
+            return (
+              <Card title="Slider">
+                <TextInput
+                  label="Target Class"
+                  className=""
+                  value={sliderConfig?.target_class ?? ''}
+                  onChange={value => setJobConfig(value, 'config.process[0].slider.target_class')}
+                  placeholder="eg. person"
+                />
+                <TextInput
+                  label="Anchor Class"
+                  className=""
+                  value={sliderConfig?.anchor_class ?? ''}
+                  onChange={value => setJobConfig(value, 'config.process[0].slider.anchor_class')}
+                  placeholder=""
+                />
+                <div className="pt-2">
+                  <label className="block text-xs text-gray-300 mb-2">
+                    Prompt Pairs ({sliderPromptPairs.length})
+                  </label>
+                  {sliderPromptPairs.map((pair, i) => (
+                    <div key={i} className="rounded-lg pl-3 pr-1 py-2 mb-3 bg-gray-950">
+                      <div className="flex items-center space-x-2">
+                        <div className="flex-1 space-y-2">
+                          <TextInput
+                            label={`Positive Prompt ${i + 1}`}
+                            className=""
+                            value={pair.positive_prompt ?? ''}
+                            onChange={value => {
+                              const nextPairs = sliderPromptPairs.map((p, idx) =>
+                                idx === i ? { ...p, positive_prompt: value } : { ...p },
+                              );
+                              updateSliderPromptPairs(nextPairs);
+                            }}
+                            placeholder="eg. person who is happy"
+                          />
+                          <TextInput
+                            label={`Negative Prompt ${i + 1}`}
+                            className=""
+                            value={pair.negative_prompt ?? ''}
+                            onChange={value => {
+                              const nextPairs = sliderPromptPairs.map((p, idx) =>
+                                idx === i ? { ...p, negative_prompt: value } : { ...p },
+                              );
+                              updateSliderPromptPairs(nextPairs);
+                            }}
+                            placeholder="eg. person who is sad"
+                          />
+                          <Checkbox
+                            label="Shuffle Tags (split on commas)"
+                            className="pt-1"
+                            checked={Boolean(pair.shuffle)}
+                            onChange={value => {
+                              const nextPairs = sliderPromptPairs.map((p, idx) =>
+                                idx === i ? { ...p, shuffle: value } : { ...p },
+                              );
+                              updateSliderPromptPairs(nextPairs);
+                            }}
+                          />
+                        </div>
+                        {sliderPromptPairs.length > 1 && (
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateSliderPromptPairs(sliderPromptPairs.filter((_, index) => index !== i))
+                              }
+                              className="rounded-full p-1 text-sm"
+                            >
+                              <X />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateSliderPromptPairs([
+                        ...sliderPromptPairs,
+                        { positive_prompt: '', negative_prompt: '', shuffle: false },
+                      ])
+                    }
+                    className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+                  >
+                    Add Prompt Pair
+                  </button>
+                </div>
+              </Card>
+            );
+          })()}
           <Card title="Save">
             <SelectInput
               label="Data Type"

@@ -1,4 +1,8 @@
+import itertools
+import math
+import random
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Optional
 
 import torch
@@ -9,14 +13,123 @@ from toolkit.prompt_utils import PromptEmbeds, concat_prompt_embeds
 from toolkit.train_tools import get_torch_dtype
 
 
+@dataclass
+class ConceptSliderPromptPair:
+    positive_prompt: str = ""
+    negative_prompt: str = ""
+    shuffle: bool = False
+
+
+def _build_shuffled_prompts(prompt: str, max_permutations: int = 8) -> list[str]:
+    """Split a tag-style prompt on commas and return up to max_permutations unique shuffles."""
+    phrases = [phrase.strip() for phrase in prompt.split(",") if phrase.strip()]
+    if len(phrases) <= 1:
+        return [", ".join(phrases)] if phrases else [prompt]
+
+    limit = max(1, max_permutations)
+    if math.factorial(len(phrases)) <= limit:
+        variants = list(dict.fromkeys(", ".join(p) for p in itertools.permutations(phrases)))
+        random.shuffle(variants)
+        return variants[:limit]
+
+    variants: list[str] = []
+    seen: set[str] = set()
+    attempts = 0
+    while len(variants) < limit and attempts < limit * 4:
+        attempts += 1
+        shuffled = phrases.copy()
+        random.shuffle(shuffled)
+        candidate = ", ".join(shuffled)
+        if candidate not in seen:
+            seen.add(candidate)
+            variants.append(candidate)
+    return variants or [", ".join(phrases)]
+
+
+def _parse_prompt_pair(item, default_shuffle: bool = False) -> ConceptSliderPromptPair:
+    if isinstance(item, ConceptSliderPromptPair):
+        return item
+    if isinstance(item, dict):
+        pos = item.get("positive_prompt", item.get("positive", ""))
+        neg = item.get("negative_prompt", item.get("negative", ""))
+        shuffle = bool(item.get("shuffle", default_shuffle))
+        return ConceptSliderPromptPair(
+            positive_prompt="" if pos is None else str(pos),
+            negative_prompt="" if neg is None else str(neg),
+            shuffle=shuffle,
+        )
+    raise ValueError(
+        f"Invalid slider prompt_pairs entry of type {type(item).__name__}; expected dict or ConceptSliderPromptPair."
+    )
+
+
 class ConceptSliderTrainerConfig:
     def __init__(self, **kwargs):
         self.guidance_strength: float = kwargs.get("guidance_strength", 3.0)
         self.anchor_strength: float = kwargs.get("anchor_strength", 1.0)
-        self.positive_prompt: str = kwargs.get("positive_prompt", "")
-        self.negative_prompt: str = kwargs.get("negative_prompt", "")
         self.target_class: str = kwargs.get("target_class", "")
         self.anchor_class: Optional[str] = kwargs.get("anchor_class", None)
+        self.shuffle: bool = bool(kwargs.get("shuffle", False))
+        self.max_permutations: int = int(kwargs.get("max_permutations", 8))
+
+        raw_pairs = kwargs.get("prompt_pairs", None)
+        raw_positive = kwargs.get("positive_prompt", "")
+        raw_negative = kwargs.get("negative_prompt", "")
+
+        if raw_pairs is not None:
+            if not isinstance(raw_pairs, (list, tuple)):
+                raise ValueError("slider.prompt_pairs must be a list of prompt pair mappings.")
+            self.prompt_pairs: list[ConceptSliderPromptPair] = [
+                _parse_prompt_pair(item, default_shuffle=self.shuffle) for item in raw_pairs
+            ]
+            if len(self.prompt_pairs) == 0:
+                if raw_positive or raw_negative:
+                    self.prompt_pairs = self._pairs_from_pos_neg(
+                        raw_positive, raw_negative, shuffle=self.shuffle
+                    )
+                else:
+                    raise ValueError("slider.prompt_pairs must contain at least one prompt pair.")
+        else:
+            self.prompt_pairs = self._pairs_from_pos_neg(
+                raw_positive, raw_negative, shuffle=self.shuffle
+            )
+
+        self.positive_prompt: str = self.prompt_pairs[0].positive_prompt
+        self.negative_prompt: str = self.prompt_pairs[0].negative_prompt
+
+    @staticmethod
+    def _pairs_from_pos_neg(
+        raw_positive, raw_negative, shuffle: bool = False
+    ) -> list[ConceptSliderPromptPair]:
+        if isinstance(raw_positive, (list, tuple)) or isinstance(raw_negative, (list, tuple)):
+            pos_list = list(raw_positive) if isinstance(raw_positive, (list, tuple)) else [raw_positive]
+            neg_list = list(raw_negative) if isinstance(raw_negative, (list, tuple)) else [raw_negative]
+            if len(pos_list) == 1 and len(neg_list) > 1:
+                pos_list = pos_list * len(neg_list)
+            elif len(neg_list) == 1 and len(pos_list) > 1:
+                neg_list = neg_list * len(pos_list)
+            elif len(pos_list) != len(neg_list):
+                raise ValueError(
+                    f"slider.positive_prompt ({len(pos_list)}) and slider.negative_prompt ({len(neg_list)}) must have the same length."
+                )
+            if len(pos_list) == 0:
+                raise ValueError("slider prompt lists must contain at least one prompt pair.")
+            return [
+                ConceptSliderPromptPair(
+                    positive_prompt="" if pos is None else str(pos),
+                    negative_prompt="" if neg is None else str(neg),
+                    shuffle=shuffle,
+                )
+                for pos, neg in zip(pos_list, neg_list)
+            ]
+
+        return [
+            ConceptSliderPromptPair(
+                positive_prompt="" if raw_positive is None else str(raw_positive),
+                negative_prompt="" if raw_negative is None else str(raw_negative),
+                shuffle=shuffle,
+            )
+        ]
 
 
 def norm_like_tensor(tensor: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -40,6 +153,8 @@ class ConceptSliderTrainer(DiffusionTrainer):
             **self.config.get("slider", {})
         )
 
+        self.prompt_pairs: list[ConceptSliderPromptPair] = self.slider.prompt_pairs
+        self.prompt_pair_embeds: list[tuple[list[PromptEmbeds], list[PromptEmbeds]]] = []
         self.positive_prompt = self.slider.positive_prompt
         self.positive_prompt_embeds: Optional[PromptEmbeds] = None
         self.negative_prompt = self.slider.negative_prompt
@@ -55,43 +170,91 @@ class ConceptSliderTrainer(DiffusionTrainer):
             # make sure model is on cpu for this part so we don't oom.
             self.sd.unet.to("cpu")
 
-        # cache unconditional embeds (blank prompt)
+        # cache prompt embeds before super() potentially unloads the text encoder
         with torch.no_grad():
-            self.positive_prompt_embeds = (
-                self.sd.encode_prompt(
-                    [self.positive_prompt],
-                )
-                .to(self.device_torch, dtype=self.sd.torch_dtype)
-                .detach()
-            )
+            prompt_cache: dict[str, PromptEmbeds] = {}
 
-            self.target_class_embeds = (
-                self.sd.encode_prompt(
-                    [self.target_class],
-                )
-                .to(self.device_torch, dtype=self.sd.torch_dtype)
-                .detach()
-            )
+            def encode_cached(prompt: str) -> PromptEmbeds:
+                if prompt not in prompt_cache:
+                    prompt_cache[prompt] = (
+                        self.sd.encode_prompt([prompt])
+                        .to(self.device_torch, dtype=self.sd.torch_dtype)
+                        .detach()
+                    )
+                return prompt_cache[prompt]
 
-            self.negative_prompt_embeds = (
-                self.sd.encode_prompt(
-                    [self.negative_prompt],
-                )
-                .to(self.device_torch, dtype=self.sd.torch_dtype)
-                .detach()
-            )
+            self.target_class_embeds = encode_cached(self.target_class)
 
             if self.anchor_class is not None:
-                self.anchor_class_embeds = (
-                    self.sd.encode_prompt(
-                        [self.anchor_class],
+                self.anchor_class_embeds = encode_cached(self.anchor_class)
+
+            self.prompt_pair_embeds = []
+            for pair in self.prompt_pairs:
+                if pair.shuffle:
+                    pos_texts = _build_shuffled_prompts(
+                        pair.positive_prompt, self.slider.max_permutations
                     )
-                    .to(self.device_torch, dtype=self.sd.torch_dtype)
-                    .detach()
+                    neg_texts = _build_shuffled_prompts(
+                        pair.negative_prompt, self.slider.max_permutations
+                    )
+                else:
+                    pos_texts = [pair.positive_prompt]
+                    neg_texts = [pair.negative_prompt]
+                self.prompt_pair_embeds.append(
+                    (
+                        [encode_cached(text) for text in pos_texts],
+                        [encode_cached(text) for text in neg_texts],
+                    )
                 )
+
+            if self.prompt_pair_embeds:
+                self.positive_prompt_embeds = self.prompt_pair_embeds[0][0][0]
+                self.negative_prompt_embeds = self.prompt_pair_embeds[0][1][0]
 
         # call parent
         super().hook_before_train_loop()
+
+    def _compute_polarity_loss(
+        self,
+        multiplier: float,
+        noisy_latents: torch.Tensor,
+        embeds: PromptEmbeds,
+        timesteps: torch.Tensor,
+        batch: "DataLoaderBatchDTO",
+        enhance_target: torch.Tensor,
+        erase_target: torch.Tensor,
+        anchor_target: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        self.network.set_multiplier(multiplier)
+        pred = self.sd.predict_noise(
+            latents=noisy_latents,
+            conditional_embeddings=embeds,
+            timestep=timesteps,
+            guidance_scale=1.0,
+            guidance_embedding_scale=1.0,
+            batch=batch,
+        )
+
+        if anchor_target is not None:
+            class_pred, anchor_pred = pred.chunk(2, dim=0)
+        else:
+            class_pred = pred
+            anchor_pred = None
+
+        enhance_loss = torch.nn.functional.mse_loss(class_pred, enhance_target)
+        erase_loss = torch.nn.functional.mse_loss(class_pred, erase_target)
+
+        if anchor_target is None:
+            anchor_loss = torch.zeros_like(erase_loss)
+        else:
+            anchor_loss = torch.nn.functional.mse_loss(anchor_pred, anchor_target)
+
+        anchor_loss = anchor_loss * self.slider.anchor_strength
+
+        # send backward now because gradient checkpointing needs network polarity intact
+        total_loss = (enhance_loss + erase_loss + anchor_loss) / 3.0
+        total_loss.backward()
+        return total_loss.detach()
 
     def get_guided_loss(
         self,
@@ -113,7 +276,7 @@ class ConceptSliderTrainer(DiffusionTrainer):
             was_network_active = self.network.is_active
             self.network.is_active = False
 
-        # do out prior preds first
+        # do our prior preds first
         with torch.no_grad():
             dtype = get_torch_dtype(self.train_config.dtype)
             self.sd.unet.eval()
@@ -121,80 +284,80 @@ class ConceptSliderTrainer(DiffusionTrainer):
 
             batch_size = noisy_latents.shape[0]
 
-            positive_embeds = concat_prompt_embeds(
-                [self.positive_prompt_embeds] * batch_size
-            ).to(self.device_torch, dtype=dtype)
             target_class_embeds = concat_prompt_embeds(
                 [self.target_class_embeds] * batch_size
             ).to(self.device_torch, dtype=dtype)
-            negative_embeds = concat_prompt_embeds(
-                [self.negative_prompt_embeds] * batch_size
-            ).to(self.device_torch, dtype=dtype)
 
-            if self.anchor_class_embeds is not None:
+            embed_blocks = [target_class_embeds]
+            has_anchor = self.anchor_class_embeds is not None
+            if has_anchor:
                 anchor_embeds = concat_prompt_embeds(
                     [self.anchor_class_embeds] * batch_size
                 ).to(self.device_torch, dtype=dtype)
+                embed_blocks.append(anchor_embeds)
 
-            if self.anchor_class_embeds is not None:
-                # if we have an anchor, do it
-                combo_embeds = concat_prompt_embeds(
-                    [
-                        positive_embeds,
-                        target_class_embeds,
-                        negative_embeds,
-                        anchor_embeds,
-                    ]
+            for pos_variants, neg_variants in self.prompt_pair_embeds:
+                pos_embeds = random.choice(pos_variants)
+                neg_embeds = random.choice(neg_variants)
+                embed_blocks.append(
+                    concat_prompt_embeds([pos_embeds] * batch_size).to(
+                        self.device_torch, dtype=dtype
+                    )
                 )
-                num_embeds = 4
-            else:
-                combo_embeds = concat_prompt_embeds(
-                    [positive_embeds, target_class_embeds, negative_embeds]
+                embed_blocks.append(
+                    concat_prompt_embeds([neg_embeds] * batch_size).to(
+                        self.device_torch, dtype=dtype
+                    )
                 )
-                num_embeds = 3
 
-            # do them in one batch, VRAM should handle it since we are no grad
-            combo_pred = self.sd.predict_noise(
-                latents=torch.cat([noisy_latents] * num_embeds, dim=0),
-                conditional_embeddings=combo_embeds,
-                timestep=torch.cat([timesteps] * num_embeds, dim=0),
-                guidance_scale=1.0,
-                guidance_embedding_scale=1.0,
-                batch=batch,
-            )
-
-            if self.anchor_class_embeds is not None:
-                positive_pred, neutral_pred, negative_pred, anchor_target = (
-                    combo_pred.chunk(4, dim=0)
+            # chunk prior predictions to keep peak batch size <= 4 * batch_size
+            preds = []
+            max_blocks_per_batch = 4
+            for start in range(0, len(embed_blocks), max_blocks_per_batch):
+                chunk_blocks = embed_blocks[start : start + max_blocks_per_batch]
+                num_chunk_blocks = len(chunk_blocks)
+                chunk_embeds = concat_prompt_embeds(chunk_blocks)
+                chunk_pred = self.sd.predict_noise(
+                    latents=torch.cat([noisy_latents] * num_chunk_blocks, dim=0),
+                    conditional_embeddings=chunk_embeds,
+                    timestep=torch.cat([timesteps] * num_chunk_blocks, dim=0),
+                    guidance_scale=1.0,
+                    guidance_embedding_scale=1.0,
+                    batch=batch,
                 )
+                preds.extend(chunk_pred.chunk(num_chunk_blocks, dim=0))
+
+            neutral_pred = preds[0]
+            if has_anchor:
+                anchor_target = preds[1]
+                pair_offset = 2
             else:
                 anchor_target = None
-                positive_pred, neutral_pred, negative_pred = combo_pred.chunk(3, dim=0)
+                pair_offset = 1
 
-            # calculate the targets
+            pair_positives = []
+            pair_negatives = []
+            for pair_idx in range(len(self.prompt_pair_embeds)):
+                positive_pred = preds[pair_offset + 2 * pair_idx]
+                negative_pred = preds[pair_offset + 2 * pair_idx + 1]
+                pair_positives.append(
+                    (positive_pred - neutral_pred) - (negative_pred - neutral_pred)
+                )
+                pair_negatives.append(
+                    (negative_pred - neutral_pred) - (positive_pred - neutral_pred)
+                )
+
+            # average concept direction across all prompt pairs to isolate the shared concept
+            positive = torch.stack(pair_positives, dim=0).mean(dim=0)
+            negative = torch.stack(pair_negatives, dim=0).mean(dim=0)
+
             guidance_scale = self.slider.guidance_strength
-
-            # enhance_positive_target = neutral_pred + guidance_scale * (
-            #     positive_pred - negative_pred
-            # )
-            # enhance_negative_target = neutral_pred + guidance_scale * (
-            #     negative_pred - positive_pred
-            # )
-            # erase_negative_target = neutral_pred - guidance_scale * (
-            #     negative_pred - positive_pred
-            # )
-            # erase_positive_target = neutral_pred - guidance_scale * (
-            #     positive_pred - negative_pred
-            # )
-
-            positive = (positive_pred - neutral_pred) - (negative_pred - neutral_pred)
-            negative = (negative_pred - neutral_pred) - (positive_pred - neutral_pred)
 
             enhance_positive_target = neutral_pred + guidance_scale * positive
             enhance_negative_target = neutral_pred + guidance_scale * negative
             erase_negative_target = neutral_pred - guidance_scale * negative
             erase_positive_target = neutral_pred - guidance_scale * positive
-            
+
             # normalize to neutral std/mean
             enhance_positive_target = norm_like_tensor(
                 enhance_positive_target, neutral_pred
@@ -216,7 +379,7 @@ class ConceptSliderTrainer(DiffusionTrainer):
             if self.network is not None:
                 self.network.is_active = was_network_active
 
-            if self.anchor_class_embeds is not None:
+            if has_anchor:
                 # do a grad inference with our target prompt
                 embeds = concat_prompt_embeds([target_class_embeds, anchor_embeds]).to(
                     self.device_torch, dtype=dtype
@@ -229,69 +392,27 @@ class ConceptSliderTrainer(DiffusionTrainer):
             else:
                 embeds = target_class_embeds.to(self.device_torch, dtype=dtype)
 
-        # do positive first
-        self.network.set_multiplier(1.0)
-        pred = self.sd.predict_noise(
-            latents=noisy_latents,
-            conditional_embeddings=embeds,
-            timestep=timesteps,
-            guidance_scale=1.0,
-            guidance_embedding_scale=1.0,
+        total_pos_loss = self._compute_polarity_loss(
+            multiplier=1.0,
+            noisy_latents=noisy_latents,
+            embeds=embeds,
+            timesteps=timesteps,
             batch=batch,
+            enhance_target=enhance_positive_target,
+            erase_target=erase_negative_target,
+            anchor_target=anchor_target,
         )
 
-        if self.anchor_class_embeds is not None:
-            class_pred, anchor_pred = pred.chunk(2, dim=0)
-        else:
-            class_pred = pred
-            anchor_pred = None
-
-        # enhance positive loss
-        enhance_loss = torch.nn.functional.mse_loss(class_pred, enhance_positive_target)
-
-        erase_loss = torch.nn.functional.mse_loss(class_pred, erase_negative_target)
-
-        if anchor_target is None:
-            anchor_loss = torch.zeros_like(erase_loss)
-        else:
-            anchor_loss = torch.nn.functional.mse_loss(anchor_pred, anchor_target)
-
-        anchor_loss = anchor_loss * self.slider.anchor_strength
-
-        # send backward now because gradient checkpointing needs network polarity intact
-        total_pos_loss = (enhance_loss + erase_loss + anchor_loss) / 3.0
-        total_pos_loss.backward()
-        total_pos_loss = total_pos_loss.detach()
-
-        # now do negative
-        self.network.set_multiplier(-1.0)
-        pred = self.sd.predict_noise(
-            latents=noisy_latents,
-            conditional_embeddings=embeds,
-            timestep=timesteps,
-            guidance_scale=1.0,
-            guidance_embedding_scale=1.0,
+        total_neg_loss = self._compute_polarity_loss(
+            multiplier=-1.0,
+            noisy_latents=noisy_latents,
+            embeds=embeds,
+            timesteps=timesteps,
             batch=batch,
+            enhance_target=enhance_negative_target,
+            erase_target=erase_positive_target,
+            anchor_target=anchor_target,
         )
-
-        if self.anchor_class_embeds is not None:
-            class_pred, anchor_pred = pred.chunk(2, dim=0)
-        else:
-            class_pred = pred
-            anchor_pred = None
-
-        # enhance negative loss
-        enhance_loss = torch.nn.functional.mse_loss(class_pred, enhance_negative_target)
-        erase_loss = torch.nn.functional.mse_loss(class_pred, erase_positive_target)
-
-        if anchor_target is None:
-            anchor_loss = torch.zeros_like(erase_loss)
-        else:
-            anchor_loss = torch.nn.functional.mse_loss(anchor_pred, anchor_target)
-        anchor_loss = anchor_loss * self.slider.anchor_strength
-        total_neg_loss = (enhance_loss + erase_loss + anchor_loss) / 3.0
-        total_neg_loss.backward()
-        total_neg_loss = total_neg_loss.detach()
 
         self.network.set_multiplier(1.0)
 

@@ -268,11 +268,18 @@ export interface LoggingConfig {
   use_ui_logger: boolean;
 }
 
+export interface SliderPromptPair {
+  positive_prompt: string;
+  negative_prompt: string;
+  shuffle?: boolean;
+}
+
 export interface SliderConfig {
   guidance_strength?: number;
   anchor_strength?: number;
   positive_prompt?: string;
   negative_prompt?: string;
+  prompt_pairs?: SliderPromptPair[];
   target_class?: string;
   anchor_class?: string | null;
 }

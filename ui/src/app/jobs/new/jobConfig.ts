@@ -25,8 +25,13 @@ export const defaultDatasetConfig: DatasetConfig = {
 export const defaultSliderConfig: SliderConfig = {
   guidance_strength: 3.0,
   anchor_strength: 1.0,
-  positive_prompt: 'person who is happy',
-  negative_prompt: 'person who is sad',
+  prompt_pairs: [
+    {
+      positive_prompt: 'person who is happy',
+      negative_prompt: 'person who is sad',
+      shuffle: false,
+    },
+  ],
   target_class: 'person',
   anchor_class: '',
 };
@@ -140,6 +145,26 @@ export const migrateJobConfig = (jobConfig: JobConfig): JobConfig => {
     }
     jobConfig.config.process[0].sample.samples = newSamples;
     delete jobConfig.config.process[0].sample.prompts;
+  }
+
+  // upgrade legacy single-pair slider config to prompt_pairs
+  if (
+    jobConfig?.config?.process &&
+    jobConfig.config.process[0]?.slider &&
+    (!Array.isArray(jobConfig.config.process[0].slider.prompt_pairs) ||
+      jobConfig.config.process[0].slider.prompt_pairs.length === 0) &&
+    (jobConfig.config.process[0].slider.positive_prompt !== undefined ||
+      jobConfig.config.process[0].slider.negative_prompt !== undefined)
+  ) {
+    jobConfig.config.process[0].slider.prompt_pairs = [
+      {
+        positive_prompt: jobConfig.config.process[0].slider.positive_prompt ?? '',
+        negative_prompt: jobConfig.config.process[0].slider.negative_prompt ?? '',
+        shuffle: false,
+      },
+    ];
+    delete jobConfig.config.process[0].slider.positive_prompt;
+    delete jobConfig.config.process[0].slider.negative_prompt;
   }
 
   // upgrade job from ui_trainer to diffusion_trainer

@@ -175,7 +175,10 @@ export const jobTypeOptions: JobTypeOption[] = [
     disableSections: ['trigger_word', 'train.diff_output_preservation'],
     onActivate: (config: JobConfig) => {
       // add default slider config
-      config.config.process[0].slider = { ...defaultSliderConfig };
+      config.config.process[0].slider = {
+        ...defaultSliderConfig,
+        prompt_pairs: defaultSliderConfig.prompt_pairs?.map(pair => ({ ...pair })),
+      };
       return config;
     },
     onDeactivate: (config: JobConfig) => {
