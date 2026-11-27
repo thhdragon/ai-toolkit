@@ -37,6 +37,7 @@ from toolkit.prompt_utils import PromptEmbeds
 from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
 from torchvision.transforms import functional as TF
 
+from toolkit.ideogram_caption import is_ideogram_caption_str
 from toolkit.train_tools import get_torch_dtype
 
 TEXT_EMBED_CACHE_BATCH = 16  # prompts per text-encoder forward when caching
@@ -428,6 +429,7 @@ class CaptionProcessingDTOMixin:
             super().__init__(*args, **kwargs)
             self.raw_caption: str = None
             self.raw_caption_short: str = None
+            self.raw_caption_variants: Union[List[str], None] = None
             self.caption: str = None
             self.caption_short: str = None
             # caption with the trigger word replaced by the diff output preservation class
@@ -439,17 +441,74 @@ class CaptionProcessingDTOMixin:
             self.extra_values: List[float] = dataset_config.extra_values
             self.trigger_word = dataset_config.trigger_word
 
+    @staticmethod
+    def _extract_json_caption_variants(raw_text_or_obj) -> Union[List[str], None]:
+        """Extract a list of caption strings from a JSON multi-caption object/list,
+        or return None if the input is not a multi-caption structure (e.g. Ideogram schema)."""
+        if isinstance(raw_text_or_obj, str):
+            if is_ideogram_caption_str(raw_text_or_obj):
+                return None
+            data = json.loads(raw_text_or_obj)
+        else:
+            data = raw_text_or_obj
+
+        if isinstance(data, dict):
+            return [clean_caption(v) for v in data.values() if isinstance(v, str) and v.strip()]
+        if isinstance(data, list):
+            return [clean_caption(v) for v in data if isinstance(v, str) and v.strip()]
+        if isinstance(data, str):
+            cleaned = clean_caption(data)
+            return [cleaned] if cleaned.strip() else []
+        return None
+
+    def build_dop_caption(self: 'FileItemDTO', caption: str) -> str:
+        if self.trigger_word is not None:
+            return caption.replace(
+                self.trigger_word, self.dataset_config.diff_output_preservation_class
+            )
+        return caption
+
+    def build_dopsd_caption(self: 'FileItemDTO', caption: str) -> str:
+        if self.trigger_word is not None:
+            return caption.replace(self.trigger_word, self.get_dopsd_ref_token())
+        return f"{self.get_dopsd_ref_token()} {caption}".strip()
+
+    def reset_caption_selection(self: 'FileItemDTO'):
+        """Clear the currently selected caption and cached paths so the next
+        load_caption() call samples a fresh variant."""
+        self.raw_caption = None
+        self.caption = None
+        self.caption_dop = None
+        self.caption_dopsd = None
+        self._text_embedding_path = None
+        self._dop_text_embedding_path = None
+        self._dopsd_text_embedding_path = None
+
     # todo allow for loading from sd-scripts style dict
     def load_caption(self: 'FileItemDTO', caption_dict: Union[dict, None]=None):
         if self.raw_caption is not None:
             # we already loaded it
             pass
+        elif self.raw_caption_variants is not None:
+            if len(self.raw_caption_variants) > 0:
+                self.raw_caption = random.choice(self.raw_caption_variants)
+            else:
+                self.raw_caption = self.dataset_config.default_caption or ''
+            self.raw_caption_short = self.dataset_config.default_caption
         elif caption_dict is not None and self.path in caption_dict and "caption" in caption_dict[self.path]:
             self.raw_caption = caption_dict[self.path]["caption"]
             if 'caption_short' in caption_dict[self.path]:
                 self.raw_caption_short = caption_dict[self.path]["caption_short"]
                 if self.dataset_config.use_short_captions:
                     self.raw_caption = caption_dict[self.path]["caption_short"]
+        elif caption_dict is not None and self.path in caption_dict and isinstance(caption_dict[self.path], (dict, list)):
+            variants = self._extract_json_caption_variants(caption_dict[self.path])
+            if variants:
+                self.raw_caption_variants = variants
+                self.raw_caption = random.choice(variants)
+            else:
+                self.raw_caption = self.dataset_config.default_caption or ''
+            self.raw_caption_short = self.dataset_config.default_caption
         else:
             # see if prompt file exists
             path_no_ext = os.path.splitext(self.path)[0]
@@ -459,12 +518,22 @@ class CaptionProcessingDTOMixin:
 
             if os.path.exists(prompt_path):
                 with open(prompt_path, 'r', encoding='utf-8') as f:
-                    prompt = f.read()
-                    short_caption = None
-                    prompt = clean_caption(prompt)
-                    if short_caption is not None:
-                        short_caption = clean_caption(short_caption)
-                    
+                    raw_text = f.read()
+                if prompt_ext.lower() == '.json':
+                    try:
+                        variants = self._extract_json_caption_variants(raw_text)
+                    except json.JSONDecodeError:
+                        variants = None
+                    if variants is not None:
+                        self.raw_caption_variants = variants
+                        if len(variants) > 0:
+                            prompt = random.choice(variants)
+                        else:
+                            prompt = self.dataset_config.default_caption or ''
+                    else:
+                        prompt = clean_caption(raw_text)
+                else:
+                    prompt = clean_caption(raw_text)
                     if prompt.strip() == '' and self.dataset_config.default_caption is not None:
                         prompt = self.dataset_config.default_caption
             else:
@@ -483,20 +552,11 @@ class CaptionProcessingDTOMixin:
         if self.dataset_config.diff_output_preservation:
             # replace this dataset's trigger word with the preservation class.
             # do it on the final caption so token order matches the normal caption
-            self.caption_dop = self.caption
-            if self.trigger_word is not None:
-                self.caption_dop = self.caption.replace(
-                    self.trigger_word, self.dataset_config.diff_output_preservation_class
-                )
+            self.caption_dop = self.build_dop_caption(self.caption)
         if getattr(self, 'dopsd_self_ref', False):
             # trigger word -> the self-reference token, or the token prepended
             # when there is no trigger word
-            if self.trigger_word is not None:
-                self.caption_dopsd = self.caption.replace(
-                    self.trigger_word, self.get_dopsd_ref_token()
-                )
-            else:
-                self.caption_dopsd = f"{self.get_dopsd_ref_token()} {self.caption}".strip()
+            self.caption_dopsd = self.build_dopsd_caption(self.caption)
 
     def get_dopsd_ref_token(self: 'FileItemDTO') -> str:
         # the item is always the only reference in D-OPSD mode
@@ -507,7 +567,8 @@ class CaptionProcessingDTOMixin:
             trigger=None,
             to_replace_list=None,
             add_if_not_present=False,
-            short_caption=False
+            short_caption=False,
+            raw_caption_override=None
     ):
         if trigger is None and self.trigger_word is not None:
             trigger = self.trigger_word
@@ -516,7 +577,9 @@ class CaptionProcessingDTOMixin:
             # add if not present if not regularization
             add_if_not_present = True
             
-        if short_caption:
+        if raw_caption_override is not None:
+            raw_caption = raw_caption_override
+        elif short_caption:
             raw_caption = self.raw_caption_short
         else:
             raw_caption = self.raw_caption
@@ -2575,28 +2638,48 @@ class TextEmbeddingCachingMixin:
             i = 0
             for file_item in tqdm(self.file_list, desc='Caching text embeddings to disk'):
                 file_item.latent_load_device = self.sd.device
+                if file_item.caption is None:
+                    file_item.load_caption(getattr(self, 'caption_dict', None))
 
-                text_embedding_path = file_item.get_text_embedding_path(recalculate=True)
-                # (path, caption) pairs to encode for this item
-                encode_targets = [(text_embedding_path, file_item.caption)]
                 item_config = file_item.dataset_config
-                if item_config.diff_output_preservation:
-                    dop_path = file_item.get_dop_text_embedding_path(recalculate=True)
-                    if dop_path != text_embedding_path:
-                        # trigger word was in the caption, cache the DOP version too
-                        encode_targets.append((dop_path, file_item.caption_dop))
+                has_variants = bool(file_item.raw_caption_variants and len(file_item.raw_caption_variants) > 1)
+                if has_variants:
+                    variant_captions = [
+                        file_item.get_caption(raw_caption_override=raw_cap)
+                        for raw_cap in file_item.raw_caption_variants
+                    ]
+                else:
+                    variant_captions = [file_item.caption]
+
+                # (path, caption) pairs to encode for this item
+                encode_targets = []
+                seen_target_paths = set()
+                for cap in variant_captions:
+                    te_path = file_item._build_text_embedding_path(caption_override=cap)
+                    if te_path not in seen_target_paths:
+                        seen_target_paths.add(te_path)
+                        encode_targets.append((te_path, cap))
+                    if item_config.diff_output_preservation:
+                        cap_dop = file_item.build_dop_caption(cap)
+                        dop_path = file_item._build_text_embedding_path(caption_override=cap_dop)
+                        if dop_path not in seen_target_paths:
+                            seen_target_paths.add(dop_path)
+                            encode_targets.append((dop_path, cap_dop))
+
                 # dropout embeds are encoded as plain text (no control images)
                 dropout_target_paths = set()
                 if item_config.caption_dropout_rate > 0:
                     blank_path = file_item.get_blank_text_embedding_path(recalculate=True)
-                    if blank_path != text_embedding_path:
+                    if blank_path not in seen_target_paths:
+                        seen_target_paths.add(blank_path)
                         # cache the dropout caption embedding (blank, or trigger word only)
                         encode_targets.append((blank_path, file_item.get_dropout_caption()))
                         dropout_target_paths.add(blank_path)
                     if item_config.diff_output_preservation:
                         # cache the DOP version of the dropout caption (class only)
                         dop_blank_path = file_item.get_dop_blank_text_embedding_path(recalculate=True)
-                        if dop_blank_path not in [t[0] for t in encode_targets] + [text_embedding_path]:
+                        if dop_blank_path not in seen_target_paths:
+                            seen_target_paths.add(dop_blank_path)
                             encode_targets.append((dop_blank_path, file_item.get_dop_dropout_caption()))
                             dropout_target_paths.add(dop_blank_path)
                 # only process if not saved to disk
@@ -2712,13 +2795,19 @@ class TextEmbeddingCachingMixin:
                             "control images/videos: the item itself must be the only "
                             f"reference. Offending item: {file_item.path}"
                         )
-                    dopsd_targets = [(
-                        file_item.get_dopsd_text_embedding_path(recalculate=True),
-                        file_item.caption_dopsd,
-                    )]
+                    dopsd_targets = []
+                    seen_dopsd_paths = set()
+                    for cap in variant_captions:
+                        cap_dopsd = file_item.build_dopsd_caption(cap)
+                        dopsd_path = file_item._build_text_embedding_path(
+                            caption_override=cap_dopsd, dopsd_self_ref=True
+                        )
+                        if dopsd_path not in seen_dopsd_paths:
+                            seen_dopsd_paths.add(dopsd_path)
+                            dopsd_targets.append((dopsd_path, cap_dopsd))
                     if item_config.caption_dropout_rate > 0:
                         dopsd_blank_path = file_item.get_dopsd_blank_text_embedding_path(recalculate=True)
-                        if dopsd_blank_path != dopsd_targets[0][0]:
+                        if dopsd_blank_path not in seen_dopsd_paths:
                             dopsd_targets.append((dopsd_blank_path, file_item.get_dopsd_dropout_caption()))
                     dopsd_targets = [t for t in dopsd_targets if not os.path.exists(t[0])]
                     if len(dopsd_targets) > 0:
@@ -2748,6 +2837,8 @@ class TextEmbeddingCachingMixin:
                             prompt_embeds.save(path)
                             del prompt_embeds
                 file_item.is_text_embedding_cached = True
+                if has_variants:
+                    file_item.reset_caption_selection()
                 i += 1
             flush_pending()
             # restore device state
