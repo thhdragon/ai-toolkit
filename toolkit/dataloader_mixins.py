@@ -132,7 +132,14 @@ def waveform_to_stereo(waveform):
 
 
 class CaptionMixin:
-    def get_caption_item(self: 'AiToolkitDataset', index):
+    if TYPE_CHECKING:
+        file_list: List[Union[str, 'FileItemDTO', tuple]]
+        dataset_config: 'DatasetConfig'
+        caption_type: Union[str, None]
+        default_prompt: str
+        default_caption: str
+
+    def get_caption_item(self, index):
         if not hasattr(self, 'caption_type'):
             raise Exception('caption_type not found on class instance')
         if not hasattr(self, 'file_list'):
@@ -238,10 +245,10 @@ class BucketsMixin:
         self.buckets: Dict[str, Bucket] = {}
         self.batch_indices: List[List[int]] = []
 
-    def build_batch_indices(self: 'AiToolkitDataset'):
+    def build_batch_indices(self):
         self.batch_indices = []
         is_nr = getattr(self, 'is_nr_mmdit', False)
-        for key, bucket in self.buckets.items():
+        for bucket in self.buckets.values():
             # NR-MMDiT models retain native resolution per image. When images have diverse
             # native shapes, they cannot be stacked into uniform 4D tensors per batch,
             # so each batch item is processed individually (batch_size=1).
@@ -256,11 +263,11 @@ class BucketsMixin:
                     batch = batch + pad
                 self.batch_indices.append(batch)
 
-    def shuffle_buckets(self: 'AiToolkitDataset'):
+    def shuffle_buckets(self):
         for key, bucket in self.buckets.items():
             random.shuffle(bucket.file_list_idx)
 
-    def setup_buckets(self: 'AiToolkitDataset', quiet=False):
+    def setup_buckets(self, quiet=False):
         if not hasattr(self, 'file_list'):
             raise Exception(f'file_list not found on class instance {self.__class__.__name__}')
         if not hasattr(self, 'dataset_config'):
@@ -424,7 +431,7 @@ class BucketsMixin:
 
 
 class CaptionProcessingDTOMixin:
-    def __init__(self: 'FileItemDTO', *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         if hasattr(super(), '__init__'):
             super().__init__(*args, **kwargs)
             self.raw_caption: str = None
@@ -461,19 +468,19 @@ class CaptionProcessingDTOMixin:
             return [cleaned] if cleaned.strip() else []
         return None
 
-    def build_dop_caption(self: 'FileItemDTO', caption: str) -> str:
+    def build_dop_caption(self, caption: str) -> str:
         if self.trigger_word is not None:
             return caption.replace(
                 self.trigger_word, self.dataset_config.diff_output_preservation_class
             )
         return caption
 
-    def build_dopsd_caption(self: 'FileItemDTO', caption: str) -> str:
+    def build_dopsd_caption(self, caption: str) -> str:
         if self.trigger_word is not None:
             return caption.replace(self.trigger_word, self.get_dopsd_ref_token())
         return f"{self.get_dopsd_ref_token()} {caption}".strip()
 
-    def reset_caption_selection(self: 'FileItemDTO'):
+    def reset_caption_selection(self):
         """Clear the currently selected caption and cached paths so the next
         load_caption() call samples a fresh variant."""
         self.raw_caption = None
@@ -485,7 +492,7 @@ class CaptionProcessingDTOMixin:
         self._dopsd_text_embedding_path = None
 
     # todo allow for loading from sd-scripts style dict
-    def load_caption(self: 'FileItemDTO', caption_dict: Union[dict, None]=None):
+    def load_caption(self, caption_dict: Union[dict, None]=None):
         if self.raw_caption is not None:
             # we already loaded it
             pass
@@ -558,12 +565,12 @@ class CaptionProcessingDTOMixin:
             # when there is no trigger word
             self.caption_dopsd = self.build_dopsd_caption(self.caption)
 
-    def get_dopsd_ref_token(self: 'FileItemDTO') -> str:
+    def get_dopsd_ref_token(self) -> str:
         # the item is always the only reference in D-OPSD mode
         return "<Video 1>" if self.is_video else "<Picture 1>"
 
     def get_caption(
-            self: 'FileItemDTO',
+            self,
             trigger=None,
             to_replace_list=None,
             add_if_not_present=False,
@@ -654,7 +661,7 @@ class CaptionProcessingDTOMixin:
         return caption
 
 class AudioProcessingDTOMixin:
-    def load_and_process_audio(self: 'FileItemDTO'):
+    def load_and_process_audio(self):
         # Default to "no audio" unless we successfully extract it
         self.audio_data = None
         self.audio_tensor = None
@@ -676,7 +683,7 @@ class AudioProcessingDTOMixin:
         
 
 class ImageProcessingDTOMixin:
-    def get_auto_frame_count(self: 'FileItemDTO', total_frames: int, video_fps: float) -> int:
+    def get_auto_frame_count(self, total_frames: int, video_fps: float) -> int:
         # frame count this video will train at with auto_frame_count. Also called at
         # FileItemDTO init so bucket keys carry the real frame count, so it must give
         # the same answer at bucketing time and at load time.
@@ -704,7 +711,7 @@ class ImageProcessingDTOMixin:
         return desired_num_frames
 
     def load_and_process_video(
-        self: 'FileItemDTO',
+        self,
         transform: Union[None, transforms.Compose],
         only_load_latents=False
     ):
@@ -1056,7 +1063,7 @@ class ImageProcessingDTOMixin:
             raise Exception(f"Video loading error ({self.path}): {error_msg}") from e
         
     def load_and_process_image(
-            self: 'FileItemDTO',
+            self,
             transform: Union[None, transforms.Compose],
             only_load_latents=False
     ):
@@ -1191,7 +1198,7 @@ class ImageProcessingDTOMixin:
 
 
 class InpaintControlFileItemDTOMixin:
-    def __init__(self: 'FileItemDTO', *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         if hasattr(super(), '__init__'):
             super().__init__(*args, **kwargs)
         self.has_inpaint_image = False
@@ -1213,7 +1220,7 @@ class InpaintControlFileItemDTOMixin:
                     self.has_inpaint_image = True
                     break
                 
-    def load_inpaint_image(self: 'FileItemDTO'):
+    def load_inpaint_image(self):
         try:
             # image must have alpha channel for inpaint
             img = Image.open(self.inpaint_path)
@@ -1269,12 +1276,12 @@ class InpaintControlFileItemDTOMixin:
             print_acc(f"Error loading image: {self.inpaint_path}")
 
     
-    def cleanup_inpaint(self: 'FileItemDTO'):
+    def cleanup_inpaint(self):
         self.inpaint_tensor = None
                 
 
 class ControlFileItemDTOMixin:
-    def __init__(self: 'FileItemDTO', *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         if hasattr(super(), '__init__'):
             super().__init__(*args, **kwargs)
         self.has_control_image = False
@@ -1327,7 +1334,7 @@ class ControlFileItemDTOMixin:
             self.full_size_control_images = dataset_config.full_size_control_images
             self.has_control_image = True
 
-    def get_new_control_paths(self: 'FileItemDTO'):
+    def get_new_control_paths(self):
         if self.dataset_config.control_from_same_folder:
             # randomly grab image paths from the same folder as if they came from control_path
             pool_folder = os.path.dirname(self.path)
@@ -1344,7 +1351,7 @@ class ControlFileItemDTOMixin:
         else:
             return self.control_path
 
-    def load_control_image(self: 'FileItemDTO'):
+    def load_control_image(self):
         control_tensors = []
         control_path_list = self.get_new_control_paths()
         if not isinstance(control_path_list, list):
@@ -1422,13 +1429,13 @@ class ControlFileItemDTOMixin:
         else:
             self.control_tensor = torch.stack(control_tensors, dim=0)
 
-    def cleanup_control(self: 'FileItemDTO'):
+    def cleanup_control(self):
         self.control_tensor = None
         self.control_tensor_list = None
 
 
 class ClipImageFileItemDTOMixin:
-    def __init__(self: 'FileItemDTO', *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         if hasattr(super(), '__init__'):
             super().__init__(*args, **kwargs)
         self.has_clip_image = False
@@ -1470,7 +1477,7 @@ class ClipImageFileItemDTOMixin:
             self.has_clip_image = True
             self.build_clip_imag_augmentation_transform()
 
-    def build_clip_imag_augmentation_transform(self: 'FileItemDTO'):
+    def build_clip_imag_augmentation_transform(self):
         if self.dataset_config.clip_image_augmentations is not None and len(self.dataset_config.clip_image_augmentations) > 0:
             self.has_clip_augmentations = True
             augmentations = [Augments(**aug) for aug in self.dataset_config.clip_image_augmentations]
@@ -1489,7 +1496,7 @@ class ClipImageFileItemDTOMixin:
 
             self.clip_image_aug_transform = A.Compose(augmentation_list)
 
-    def augment_clip_image(self: 'FileItemDTO', img: Image, transform: Union[None, transforms.Compose], ):
+    def augment_clip_image(self, img: Image, transform: Union[None, transforms.Compose], ):
         if self.dataset_config.clip_image_shuffle_augmentations:
             self.build_clip_imag_augmentation_transform()
 
@@ -1525,7 +1532,7 @@ class ClipImageFileItemDTOMixin:
 
         return augmented_tensor
 
-    def get_clip_vision_info_dict(self: 'FileItemDTO'):
+    def get_clip_vision_info_dict(self):
         item = OrderedDict([
             ("image_encoder_path", self.clip_image_encoder_path),
             ("filename", os.path.basename(self.clip_image_path)),
@@ -1537,7 +1544,7 @@ class ClipImageFileItemDTOMixin:
         if self.flip_y:
             item["flip_y"] = True
         return item
-    def get_clip_vision_embeddings_path(self: 'FileItemDTO', recalculate=False):
+    def get_clip_vision_embeddings_path(self, recalculate=False):
         if self._clip_vision_embeddings_path is not None and not recalculate:
             return self._clip_vision_embeddings_path
         else:
@@ -1554,7 +1561,7 @@ class ClipImageFileItemDTOMixin:
 
         return self._clip_vision_embeddings_path
     
-    def get_new_clip_image_path(self: 'FileItemDTO'):
+    def get_new_clip_image_path(self):
         if self.dataset_config.clip_image_from_same_folder:
             # randomly grab an image path from the same folder
             pool_folder = os.path.dirname(self.path)
@@ -1570,7 +1577,7 @@ class ClipImageFileItemDTOMixin:
         else:
             return self.clip_image_path
 
-    def load_clip_image(self: 'FileItemDTO'):
+    def load_clip_image(self):
         is_dynamic_size_and_aspect = isinstance(self.clip_image_processor, PixtralVisionImagePreprocessorCompatible) or \
                                     isinstance(self.clip_image_processor, SiglipImageProcessor)
         if self.clip_image_processor is None:
@@ -1646,7 +1653,7 @@ class ClipImageFileItemDTOMixin:
             ).pixel_values
             self.clip_image_tensor = clip_out.squeeze(0).clone().detach()
 
-    def cleanup_clip_image(self: 'FileItemDTO'):
+    def cleanup_clip_image(self):
         self.clip_image_tensor = None
         self.clip_image_embeds = None
 
@@ -1654,7 +1661,7 @@ class ClipImageFileItemDTOMixin:
 
 
 class AugmentationFileItemDTOMixin:
-    def __init__(self: 'FileItemDTO', *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         if hasattr(super(), '__init__'):
             super().__init__(*args, **kwargs)
         self.has_augmentations = False
@@ -1665,7 +1672,7 @@ class AugmentationFileItemDTOMixin:
         self.aug_replay_spatial_transforms = None
         self.build_augmentation_transform()
 
-    def build_augmentation_transform(self: 'FileItemDTO'):
+    def build_augmentation_transform(self):
         if self.dataset_config.augmentations is not None and len(self.dataset_config.augmentations) > 0:
             self.has_augmentations = True
             augmentations = [Augments(**aug) for aug in self.dataset_config.augmentations]
@@ -1685,7 +1692,7 @@ class AugmentationFileItemDTOMixin:
             # add additional targets so we can augment the control image
             self.aug_transform = A.ReplayCompose(augmentation_list, additional_targets={'image2': 'image'})
 
-    def augment_image(self: 'FileItemDTO', img: Image, transform: Union[None, transforms.Compose], ):
+    def augment_image(self, img: Image, transform: Union[None, transforms.Compose], ):
 
         # rebuild each time if shuffle
         if self.dataset_config.shuffle_augmentations:
@@ -1727,7 +1734,7 @@ class AugmentationFileItemDTOMixin:
         return augmented_tensor
 
     # augment control images spatially consistent with transforms done to the main image
-    def augment_spatial_control(self: 'FileItemDTO', img: Image, transform: Union[None, transforms.Compose] ):
+    def augment_spatial_control(self, img: Image, transform: Union[None, transforms.Compose] ):
         if self.aug_replay_spatial_transforms is None:
             # no transforms
             return transform(img)
@@ -1762,12 +1769,12 @@ class AugmentationFileItemDTOMixin:
         augmented_tensor = transforms.ToTensor()(augmented) if transform is None else transform(augmented)
         return augmented_tensor
 
-    def cleanup_control(self: 'FileItemDTO'):
+    def cleanup_control(self):
         self.unaugmented_tensor = None
 
 
 class MaskFileItemDTOMixin:
-    def __init__(self: 'FileItemDTO', *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         if hasattr(super(), '__init__'):
             super().__init__(*args, **kwargs)
         self.has_mask_image = False
@@ -1792,7 +1799,7 @@ class MaskFileItemDTOMixin:
                     self.has_mask_image = True
                     break
 
-    def load_mask_image(self: 'FileItemDTO'):
+    def load_mask_image(self):
         try:
             img = Image.open(self.mask_path)
             img = exif_transpose(img)
@@ -1813,11 +1820,7 @@ class MaskFileItemDTOMixin:
             img = ImageOps.invert(img)
         w, h = img.size
         fix_size = False
-        if w > h and self.scale_to_width < self.scale_to_height:
-            # throw error, they should match
-            print_acc(f"unexpected values: w={w}, h={h}, file_item.scale_to_width={self.scale_to_width}, file_item.scale_to_height={self.scale_to_height}, file_item.path={self.path}")
-            fix_size = True
-        elif h > w and self.scale_to_height < self.scale_to_width:
+        if w > h and self.scale_to_width < self.scale_to_height or h > w and self.scale_to_height < self.scale_to_width:
             # throw error, they should match
             print_acc(f"unexpected values: w={w}, h={h}, file_item.scale_to_width={self.scale_to_width}, file_item.scale_to_height={self.scale_to_height}, file_item.path={self.path}")
             fix_size = True
@@ -1870,12 +1873,12 @@ class MaskFileItemDTOMixin:
         self.mask_tensor = value_map(self.mask_tensor, 0, 1.0, self.mask_min_value, 1.0)
         # convert to grayscale
 
-    def cleanup_mask(self: 'FileItemDTO'):
+    def cleanup_mask(self):
         self.mask_tensor = None
 
 
 class UnconditionalFileItemDTOMixin:
-    def __init__(self: 'FileItemDTO', *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         if hasattr(super(), '__init__'):
             super().__init__(*args, **kwargs)
         self.has_unconditional = False
@@ -1883,7 +1886,7 @@ class UnconditionalFileItemDTOMixin:
         self.unconditional_tensor: Union[torch.Tensor, None] = None
         self.unconditional_latent: Union[torch.Tensor, None] = None
         self.unconditional_transforms = self.dataloader_transforms
-        dataset_config: 'DatasetConfig' = kwargs.get('dataset_config', None)
+        dataset_config: DatasetConfig = kwargs.get('dataset_config', None)
 
         if dataset_config.unconditional_path is not None:
             # we are using control images
@@ -1895,7 +1898,7 @@ class UnconditionalFileItemDTOMixin:
                     self.has_unconditional = True
                     break
 
-    def load_unconditional_image(self: 'FileItemDTO'):
+    def load_unconditional_image(self):
         try:
             img = Image.open(self.unconditional_path)
             img = exif_transpose(img)
@@ -1905,11 +1908,7 @@ class UnconditionalFileItemDTOMixin:
 
         img = img.convert('RGB')
         w, h = img.size
-        if w > h and self.scale_to_width < self.scale_to_height:
-            # throw error, they should match
-            raise ValueError(
-                f"unexpected values: w={w}, h={h}, file_item.scale_to_width={self.scale_to_width}, file_item.scale_to_height={self.scale_to_height}, file_item.path={self.path}")
-        elif h > w and self.scale_to_height < self.scale_to_width:
+        if w > h and self.scale_to_width < self.scale_to_height or h > w and self.scale_to_height < self.scale_to_width:
             # throw error, they should match
             raise ValueError(
                 f"unexpected values: w={w}, h={h}, file_item.scale_to_width={self.scale_to_width}, file_item.scale_to_height={self.scale_to_height}, file_item.path={self.path}")
@@ -1940,7 +1939,7 @@ class UnconditionalFileItemDTOMixin:
         else:
             self.unconditional_tensor = self.unconditional_transforms(img)
 
-    def cleanup_unconditional(self: 'FileItemDTO'):
+    def cleanup_unconditional(self):
         self.unconditional_tensor = None
         self.unconditional_latent = None
 
@@ -2001,7 +2000,7 @@ class LatentCachingFileItemDTOMixin:
         # todo, increment this if we change the latent format to invalidate cache
         self.latent_version = 1
 
-    def get_latent_info_dict(self: 'FileItemDTO'):
+    def get_latent_info_dict(self):
         item = OrderedDict([
             ("filename", os.path.basename(self.path)),
             ("scale_to_width", self.scale_to_width),
@@ -2053,7 +2052,7 @@ class LatentCachingFileItemDTOMixin:
             item["load_rgba"] = True
         return item
 
-    def get_latent_path(self: 'FileItemDTO', recalculate=False):
+    def get_latent_path(self, recalculate=False):
         if self._latent_path is not None and not recalculate:
             return self._latent_path
         else:
@@ -2126,13 +2125,13 @@ class LatentCachingFileItemDTOMixin:
 
 
 class LatentCachingMixin:
-    def __init__(self: 'AiToolkitDataset', **kwargs):
+    def __init__(self, **kwargs):
         # if we have super, call it
         if hasattr(super(), '__init__'):
             super().__init__(**kwargs)
         self.latent_cache = {}
 
-    def cache_latents_all_latents(self: 'AiToolkitDataset'):
+    def cache_latents_all_latents(self):
         with accelerator.main_process_first():
             print_acc(f"Caching latents for {self.dataset_path}")
             # cache all latents to disk
@@ -2166,7 +2165,7 @@ class LatentCachingMixin:
                     prep_item.load_and_process_image(prep_item.dataloader_transforms or self.transform, only_load_latents=True)
                 except Exception as e:
                     print_acc(f"Error processing image: {prep_item.path}")
-                    print_acc(f"Error: {str(e)}")
+                    print_acc(f"Error: {e!s}")
                     print_acc(" - Skipping file and removing it from the dataset")
                     return prep_item, None, None, False
                 return prep_item, prep_latent_path, None, True
@@ -2220,7 +2219,7 @@ class LatentCachingMixin:
             if did_move:
                 self.sd.restore_device_state()
 
-    def _remove_file_items(self: 'AiToolkitDataset', items_to_remove: List['FileItemDTO']):
+    def _remove_file_items(self, items_to_remove: List['FileItemDTO']):
         # buckets hold raw indices into file_list, so removal requires remapping them
         remove_ids = {id(item) for item in items_to_remove}
         old_to_new = {}
@@ -2240,7 +2239,7 @@ class LatentCachingMixin:
             self.build_batch_indices()
 
     def _cache_one_latent(
-            self: 'AiToolkitDataset',
+            self,
             file_item: 'FileItemDTO',
             latent_path: str,
             cached_state_dict,
@@ -2397,7 +2396,7 @@ class TextEmbeddingFileItemDTOMixin:
         self.text_embedding_load_device = 'cpu'
         self.text_embedding_version = 1
 
-    def get_text_embedding_info_dict(self: 'FileItemDTO', caption_override=None, text_only=False, dopsd_self_ref=False):
+    def get_text_embedding_info_dict(self, caption_override=None, text_only=False, dopsd_self_ref=False):
         # make sure the caption is loaded here
         # TODO: we need a way to cache all the other features like trigger words, DOP, etc. For now, we need to throw an error if not compatible.
         if self.caption is None:
@@ -2436,7 +2435,7 @@ class TextEmbeddingFileItemDTOMixin:
             item["first_frame_in_te"] = True
         return item
 
-    def _build_text_embedding_path(self: 'FileItemDTO', caption_override=None, text_only=False, dopsd_self_ref=False):
+    def _build_text_embedding_path(self, caption_override=None, text_only=False, dopsd_self_ref=False):
         # we store text embeddings in a folder in same path as image called _text_embedding_cache
         img_dir = os.path.dirname(self.path)
         te_dir = os.path.join(img_dir, '_t_e_cache')
@@ -2448,7 +2447,7 @@ class TextEmbeddingFileItemDTOMixin:
         hash_str = hash_str.replace('=', '')
         return os.path.join(te_dir, f'{filename_no_ext}_{hash_str}.safetensors')
 
-    def get_text_embedding_path(self: 'FileItemDTO', recalculate=False):
+    def get_text_embedding_path(self, recalculate=False):
         if self._text_embedding_path is not None and not recalculate:
             return self._text_embedding_path
         else:
@@ -2456,7 +2455,7 @@ class TextEmbeddingFileItemDTOMixin:
 
         return self._text_embedding_path
 
-    def get_dop_text_embedding_path(self: 'FileItemDTO', recalculate=False):
+    def get_dop_text_embedding_path(self, recalculate=False):
         if self._dop_text_embedding_path is not None and not recalculate:
             return self._dop_text_embedding_path
         else:
@@ -2471,14 +2470,14 @@ class TextEmbeddingFileItemDTOMixin:
 
         return self._dop_text_embedding_path
 
-    def get_dropout_caption(self: 'FileItemDTO'):
+    def get_dropout_caption(self):
         # when encoding live, dropped captions still get the trigger word injected
         # downstream (add_if_not_present when not a reg image), so match that here
         if self.trigger_word is not None and not self.is_reg:
             return inject_trigger_into_prompt('', trigger=self.trigger_word, add_if_not_present=True)
         return ''
 
-    def get_dop_dropout_caption(self: 'FileItemDTO'):
+    def get_dop_dropout_caption(self):
         # live encoding replaces the trigger word with the preservation class on the
         # dropped caption (class only), so the cached DOP dropout caption must match
         dropout_caption = self.get_dropout_caption()
@@ -2488,7 +2487,7 @@ class TextEmbeddingFileItemDTOMixin:
             )
         return dropout_caption
 
-    def get_dop_blank_text_embedding_path(self: 'FileItemDTO', recalculate=False):
+    def get_dop_blank_text_embedding_path(self, recalculate=False):
         if self._dop_blank_text_embedding_path is not None and not recalculate:
             return self._dop_blank_text_embedding_path
         else:
@@ -2501,7 +2500,7 @@ class TextEmbeddingFileItemDTOMixin:
 
         return self._dop_blank_text_embedding_path
 
-    def get_dopsd_text_embedding_path(self: 'FileItemDTO', recalculate=False):
+    def get_dopsd_text_embedding_path(self, recalculate=False):
         if self._dopsd_text_embedding_path is not None and not recalculate:
             return self._dopsd_text_embedding_path
         # make sure the caption is loaded so caption_dopsd is built
@@ -2512,7 +2511,7 @@ class TextEmbeddingFileItemDTOMixin:
         )
         return self._dopsd_text_embedding_path
 
-    def get_dopsd_dropout_caption(self: 'FileItemDTO'):
+    def get_dopsd_dropout_caption(self):
         # dropout caption with the trigger word swapped for the self-reference token
         dropout_caption = self.get_dropout_caption()
         if self.trigger_word is not None:
@@ -2521,7 +2520,7 @@ class TextEmbeddingFileItemDTOMixin:
             )
         return f"{self.get_dopsd_ref_token()} {dropout_caption}".strip()
 
-    def get_dopsd_blank_text_embedding_path(self: 'FileItemDTO', recalculate=False):
+    def get_dopsd_blank_text_embedding_path(self, recalculate=False):
         if self._dopsd_blank_text_embedding_path is not None and not recalculate:
             return self._dopsd_blank_text_embedding_path
         # unlike DOP, dropout embeds keep the vision reference
@@ -2530,7 +2529,7 @@ class TextEmbeddingFileItemDTOMixin:
         )
         return self._dopsd_blank_text_embedding_path
 
-    def get_blank_text_embedding_path(self: 'FileItemDTO', recalculate=False):
+    def get_blank_text_embedding_path(self, recalculate=False):
         if self._blank_text_embedding_path is not None and not recalculate:
             return self._blank_text_embedding_path
         else:
@@ -2589,13 +2588,13 @@ class TextEmbeddingFileItemDTOMixin:
             self.dopsd_prompt_embeds = PromptEmbeds.load(dopsd_path)
 
 class TextEmbeddingCachingMixin:
-    def __init__(self: 'AiToolkitDataset', **kwargs):
+    def __init__(self, **kwargs):
         # if we have super, call it
         if hasattr(super(), '__init__'):
             super().__init__(**kwargs)
         self.is_caching_text_embeddings = self.dataset_config.cache_text_embeddings
 
-    def cache_text_embeddings(self: 'AiToolkitDataset'):
+    def cache_text_embeddings(self):
         with accelerator.main_process_first():
             print_acc(f"Caching text_embeddings for {self.dataset_path}")
             print_acc(" - Saving text embeddings to disk")
@@ -2847,14 +2846,14 @@ class TextEmbeddingCachingMixin:
 
 
 class CLIPCachingMixin:
-    def __init__(self: 'AiToolkitDataset', **kwargs):
+    def __init__(self, **kwargs):
         # if we have super, call it
         if hasattr(super(), '__init__'):
             super().__init__(**kwargs)
         self.clip_vision_num_unconditional_cache = 20
         self.clip_vision_unconditional_cache = []
 
-    def cache_clip_vision_to_disk(self: 'AiToolkitDataset'):
+    def cache_clip_vision_to_disk(self):
         if not self.is_caching_clip_vision_to_disk:
             return
         with torch.no_grad():
@@ -3025,12 +3024,12 @@ class CLIPCachingMixin:
 
 
 class ControlCachingMixin:
-    def __init__(self: 'AiToolkitDataset', **kwargs):
+    def __init__(self, **kwargs):
         if hasattr(super(), '__init__'):
             super().__init__(**kwargs)
             self.control_generator: ControlGenerator = None
     
-    def add_control_path_to_file_item(self: 'AiToolkitDataset', file_item: 'FileItemDTO', control_path: str, control_type: ControlTypes):
+    def add_control_path_to_file_item(self, file_item: 'FileItemDTO', control_path: str, control_type: ControlTypes):
         if control_type == 'inpaint':
             file_item.inpaint_path = control_path
             file_item.has_inpaint_image = True
@@ -3048,7 +3047,7 @@ class ControlCachingMixin:
                 raise Exception(f"Error: control_path is not a string or list: {file_item.control_path}")
             file_item.has_control_image = True
 
-    def setup_controls(self: 'AiToolkitDataset'):
+    def setup_controls(self):
         if not self.is_generating_controls:
             return
         with torch.no_grad():
